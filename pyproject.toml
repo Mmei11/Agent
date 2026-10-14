@@ -1,21 +1,37 @@
+# 项目的基本信息，以及运行后端时必须安装的依赖。
 [project]
+# 项目名：供 Python 工具识别，不要求与文件夹名称相同。
 name = "simulated-consultation-agent"
+# 我们自己项目的版本号，不是 Python 或依赖库的版本。
 version = "0.1.0"
+# 项目简介：这是使用虚构症状对话的求职演示作品。
 description = "A portfolio agent for fictional symptom conversations"
+# 只使用 Python 3.11（例如 3.11.17），暂不使用 Python 3.12。
 requires-python = ">=3.11,<3.12"
+# 双等号 == 表示固定到指定版本；uv.lock 还会锁定这些库的间接依赖。
 dependencies = [
+    # 提供 HTTP API，供后续网页调用后端。
     "fastapi==0.143.0",
+    # 组织 Agent 的状态、节点和执行流程。
     "langgraph==1.2.14",
+    # 使用 SQLite 保存和恢复 LangGraph 的会话状态。
     "langgraph-checkpoint-sqlite==3.1.1",
+    # 定义并校验输入、动作和输出的数据结构。
     "pydantic==2.14.1",
+    # 运行 FastAPI 应用的服务程序。
     "uvicorn==0.54.0",
 ]
 
+# 开发和测试时使用的依赖组，不属于上面的核心运行依赖。
 [dependency-groups]
 dev = [
+    # 测试 HTTP 接口时使用，例如 FastAPI 的 TestClient。
     "httpx==0.28.1",
+    # 运行自动化测试。
     "pytest==9.1.1",
 ]
 
+# uv 的专用配置。
 [tool.uv]
+# 目前只安装依赖，不把这个项目自身构建并安装成 Python 包。
 package = false
