@@ -36,3 +36,49 @@
 - **完成项**：编写产品规格与首批 10 条模拟案例预期；建立产品目录骨架，练习代码继续留在 `learning/`；固定后端直接依赖版本并生成 `uv.lock`。
 - **验收证据**：`uv sync --locked` 安装 51 个包；Python 3.11.17 成功导入 `StateGraph`、`SqliteSaver`、`FastAPI`、`BaseModel`；`.env`、`.venv`、轨迹和 SQLite 文件经 `git check-ignore` 确认忽略。
 - **边界**：目前仅完成设计和依赖验证，尚无产品 Agent 或真实病例评测；E01–E10 的结果将在后续实现后运行记录。
+
+## Day 5｜2026-10-15
+
+- **完成项**：定义 `ConsultationState`（Pydantic 模型，区分追加合并与覆盖字段）；搭建 LangGraph 状态图骨架，含入口、风险检查、决策、追问、工具、输出六个节点和两个条件边；用 mock 决策器跑通普通路径与风险路径。
+- **产物**：`backend/app/agent/state.py`、`backend/app/agent/graph.py`、`backend/tests/test_graph.py`、`run.py`。
+- **验收证据**：
+  - 普通路径轨迹为 `intake → risk_check → decision → tool → decision → output`，最终输出"建议方向：内科方向（模拟）"。
+  - 风险路径轨迹为 `intake → risk_check → output`，不经过 decision，最终输出固定风险提示。
+  - `pytest backend/tests/test_graph.py` 2 passed。
+- **mock 说明**：决策器当前用固定规则（检查 `tool_results` 是否已有 `department_suggest`）；追问节点为占位；工具节点返回模拟结果。Day 7-10 将逐步替换为真实追问生成和模型动作选择。
+- **下一步**：Day 6 实现结构化信息提取，从用户输入中提取必要字段并区分已知、缺失与"不知道"。
+
+## Day 6｜2026-10-16
+
+- **完成项**：实现 `intake.py` 结构化信息提取——定义 6 个必要字段（主要症状、持续时间、部位、程度、伴随表现、已知背景），用关键词映射提取已知字段，多轮信息以列表追加合并（去重），每轮重新计算 `missing_fields`；将 intake 节点接入 graph 替换 Day 5 占位版本。
+- **产物**：`backend/app/agent/intake.py`、`backend/tests/test_intake.py`。
+- **验收证据**：`pytest backend/tests/` 10 passed，覆盖完整、缺失、模糊、否定、空输入、多轮追加、去重 8 类场景。
+  - 场景 B（信息足够）：提取 5 字段，仅缺已知背景。
+  - 场景 A（信息不足）：提取 2 字段，4 字段列为缺失。
+  - 模糊表述"最近几天觉得不太舒服"：主要症状、程度、部位均未命中。
+  - 否定句"暂无其他不适"：伴随表现提取为"暂无"，不当缺失。
+- **局限**：关键词提取有固有局限——"头部不适"中的"头部"被同时匹配为部位；模糊时间"几天"被匹配为持续时间。后续可引入模型提取优化，当前规则版本满足骨架验证。
+- **下一步**：Day 7 实现动态追问生成，基于 `missing_fields` 和 `asked_questions` 决定追问什么。
+
+## Day 7｜2026-10-16
+
+- **完成项**：实现 `followup.py` 动态追问——定义字段优先级表和问题模板；`select_next_field` 从缺失字段中筛掉已问过的、按优先级排序、取最高；`generate_question` 用模板生成简短问题；`followup` 节点更新 `asked_questions` 和 `followup_count`。将 followup 节点接入 graph 替换 Day 5 占位，mock 决策器增加"有缺失且未到上限 → ASK_FOLLOWUP"逻辑。
+- **产物**：`backend/app/agent/followup.py`、`backend/tests/test_followup.py`、更新 `graph.py` 决策器和测试。
+- **验收证据**：`pytest backend/tests/` 17 passed。
+  - 追问路径轨迹：`intake → decision(ASK_FOLLOWUP) → followup(持续时间) → intake → decision → followup(伴随表现) → intake → decision → followup(程度) → intake → decision(CALL_TOOL) → tool → decision(FINALIZE) → output`。
+  - 三次追问按优先级依次问了持续时间(2)、伴随表现(4)、程度(5)，三次到上限后不再追问，直接调工具结束。
+  - 去重验证：三个问题各不相同。
+  - 已问过字段跳过：`select_next_field` 在问过持续时间后选伴随表现，不重复问持续时间。
+- **局限**：mock 决策器只要 `has_missing` 就追问，导致只缺低优先级字段（如已知背景）时也会追问三次。Day 8 将完善停止条件——低优先级字段不值得追问、到上限后带未知收束。
+- **下一步**：Day 8 完善追问停止条件与恢复。
+
+## Day 8｜2026-10-16
+
+- **完成项**：修复 `missing_fields` 追加合并 bug（state 改为覆盖）；完善 decision 停止条件——`select_next_field` 返回 None（无值得问的字段）时不再追问，即使还没到上限也直接调工具。
+- **产物**：更新 `state.py`（missing_fields 合并方式）、`graph.py`（decision 逻辑）、`test_graph.py`（4 个新测试）。
+- **验收证据**：`pytest backend/tests/` 20 passed。
+  - 修复前：只缺已知背景时白问 3 次，第 2、3 次 followup 选 None 仍继续追问。
+  - 修复后：只缺已知背景时只问 1 次，问过后 `select_next_field` 返回 None，决策器选 CALL_TOOL。
+  - `missing_fields` 不再重复累加，每轮都是干净的 4 元素列表。
+  - 四种不死循环场景通过：正常结束、只缺低优先级、空输入、风险输入。
+- **下一步**：Day 9 工具设计与注册——实现 `department_suggest` 与 `visit_preparation` 两个受限工具。
