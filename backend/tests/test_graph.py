@@ -11,8 +11,8 @@ def test_normal_path_calls_tool_then_finalizes():
     })
 
     assert result["risk_flags"] == []
-    assert result["tool_results"]["department_suggest"] == "内科方向（模拟）"
-    assert result["final_result"] == "建议方向：内科方向（模拟）"
+    assert result["tool_results"]["department_suggest"] == {"department": "神经内科"}
+    assert result["final_result"] == "建议方向：神经内科"
 
     nodes = [entry["node"] for entry in result["trace"]]
     assert nodes == [
@@ -44,7 +44,7 @@ def test_followup_path_asks_then_tools():
     result = app.invoke({"latest_user_message": "头部不适"})
 
     assert result["followup_count"] == 3
-    assert result["tool_results"]["department_suggest"] == "内科方向（模拟）"
+    assert result["tool_results"]["department_suggest"] == {"department": "神经内科"}
 
     nodes = [entry["node"] for entry in result["trace"]]
     # 应包含三次 followup，最后走 tool → decision → output
@@ -62,7 +62,7 @@ def test_low_priority_field_only_one_followup():
 
     # 只缺已知背景，问一次后 select_next_field 返回 None，不再追问
     assert result["followup_count"] == 1
-    assert result["tool_results"]["department_suggest"] == "内科方向（模拟）"
+    assert result["tool_results"]["department_suggest"] == {"department": "神经内科"}
 
 
 def test_missing_fields_not_duplicated():

@@ -5,6 +5,7 @@ from langgraph.graph import END, START, StateGraph
 from backend.app.agent.followup import followup, select_next_field
 from backend.app.agent.intake import intake
 from backend.app.agent.state import ConsultationState
+from backend.app.tools.registry import TOOL_REGISTRY
 
 MAX_FOLLOWUPS = 3
 
@@ -62,12 +63,19 @@ def route_after_decision(state: ConsultationState) -> str:
 
 
 def tool(state: ConsultationState) -> dict:
-    """工具节点：Day 9 实现真实受限工具注册。骨架先返回 mock 结果。"""
+    """工具节点：从注册表调用受限工具，把结构化结果写回 state。
+
+    Day 9：mock 决策器只调 department_suggest。
+    Day 10 起模型可选择调用哪个工具。
+    """
     results = dict(state.tool_results)
-    results["department_suggest"] = "内科方向（模拟）"
+    tool_name = "department_suggest"
+    tool_fn = TOOL_REGISTRY[tool_name]
+    result = tool_fn(state.collected_facts)
+    results[tool_name] = result
     return {
         "tool_results": results,
-        "trace": [{"node": "tool", "called": "department_suggest"}],
+        "trace": [{"node": "tool", "called": tool_name, "result": result}],
     }
 
 
@@ -76,8 +84,12 @@ def output(state: ConsultationState) -> dict:
     if state.risk_flags:
         result = "检测到预设风险场景，请立即寻求专业帮助。（规则 R001）"
     else:
-        dept = state.tool_results.get("department_suggest", "暂无")
-        result = f"建议方向：{dept}"
+        dept_result = state.tool_results.get("department_suggest", {})
+        dept = dept_result.get("department")
+        if dept:
+            result = f"建议方向：{dept}"
+        else:
+            result = "暂无法判断科室方向"
     return {
         "final_result": result,
         "trace": [{"node": "output", "final": result}],

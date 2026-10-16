@@ -82,3 +82,13 @@
   - `missing_fields` 不再重复累加，每轮都是干净的 4 元素列表。
   - 四种不死循环场景通过：正常结束、只缺低优先级、空输入、风险输入。
 - **下一步**：Day 9 工具设计与注册——实现 `department_suggest` 与 `visit_preparation` 两个受限工具。
+
+## Day 9｜2026-10-16
+
+- **完成项**：实现 `backend/app/tools/registry.py`——`department_suggest`（症状关键词→科室映射，无匹配返回"暂无法判断"不编造）、`visit_preparation`（从 collected_facts 生成就诊信息清单，无信息返回通用清单）、`TOOL_REGISTRY` 统一注册表。将 graph.py 的 tool 节点从写死"内科方向（模拟）"改为调用真实工具；output 节点改为读结构化结果渲染。
+- **产物**：`backend/app/tools/registry.py`、`backend/tests/test_tools.py`、更新 `graph.py` 和 `test_graph.py`。
+- **验收证据**：`pytest backend/tests/` 27 passed。
+  - `department_suggest`：头部不适→神经内科，腹痛→消化内科，无匹配→department=None + reason。
+  - `visit_preparation`：有事实时清单包含主要不适/持续时间/部位等条目，空参数返回通用清单。
+  - 工具返回结构化字典而非字符串，output 节点按 schema 读取。
+- **下一步**：Day 10 让 Agent 自主选择动作——替换 mock 决策器为模型决策，在 ASK_FOLLOWUP / CALL_TOOL / FINALIZE 中选择。
