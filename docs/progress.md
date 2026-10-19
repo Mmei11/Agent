@@ -92,3 +92,16 @@
   - `visit_preparation`：有事实时清单包含主要不适/持续时间/部位等条目，空参数返回通用清单。
   - 工具返回结构化字典而非字符串，output 节点按 schema 读取。
 - **下一步**：Day 10 让 Agent 自主选择动作——替换 mock 决策器为模型决策，在 ASK_FOLLOWUP / CALL_TOOL / FINALIZE 中选择。
+
+## Day 10｜2026-10-19
+
+- **完成项**：实现 `backend/app/agent/decision.py`——模型决策器（`model_choose` 调百炼返回 JSON）、预设决策器（`mock_choose` 规则兜底）、`parse_action` 解析校验动作名、`validate_action` 校验模型选的动作是否合法并兜底。更新 graph.py decision 节点：模型选的动作记入 trace（`model_choice`），程序校验后的最终动作也记入（`final_action`），两者可能不同。用 `USE_MODEL=1` 环境变量切换模型/预设模式。
+- **产物**：`backend/app/agent/decision.py`、`backend/tests/test_decision.py`、更新 `graph.py`。
+- **验收证据**：`pytest backend/tests/` 35 passed。
+  - 模型选 ASK_FOLLOWUP 但没有可问的字段 → 程序兜底为 CALL_TOOL。
+  - 模型选 CALL_TOOL 但工具已调过 → 程序兜底为 FINALIZE（不重复调）。
+  - 模型选的动作合法 → 程序放行。
+  - 模型返回未知动作或非法 JSON → 抛 DecisionError。
+  - 模型不可用时自动回退预设决策器。
+- **里程碑意义**：这是第一个重要里程碑——Agent 现在可以自主选择动作。模型负责在 ASK_FOLLOWUP / CALL_TOOL / FINALIZE 中"提"，程序负责"判"（校验和兜底）。风险门控先于 decision，模型碰不到。trace 同时记录模型选择和最终执行，可从轨迹解释每步决策依据。
+- **下一步**：Day 11 风险门控与输出边界——完善风险检查规则，处理否定句、含糊表述和跨轮补充。

@@ -1,13 +1,23 @@
-"""Day 5-7：问诊 Agent 状态图。intake 用 Day 6 提取，followup 用 Day 7 动态追问。mock 决策器先走通。案例均为虚构。"""
+"""Day 5-10：问诊 Agent 状态图。决策器支持模型和预设两种模式。案例均为虚构。"""
 
-from langgraph.graph import END, START, StateGraph
+import os  # 读取 USE_MODEL 环境变量，控制用模型还是预设
 
-from backend.app.agent.followup import followup, select_next_field
-from backend.app.agent.intake import intake
-from backend.app.agent.state import ConsultationState
-from backend.app.tools.registry import TOOL_REGISTRY
+from langgraph.graph import END, START, StateGraph  # LangGraph 图的组件
 
-MAX_FOLLOWUPS = 3
+# 从 decision.py 导入决策相关函数
+from backend.app.agent.decision import (
+    DecisionError,  # 决策错误，用于捕获后回退预设
+    mock_choose,  # 预设决策器，无 Key 时用
+    model_choose,  # 模型决策器，有 Key 时用
+    parse_action,  # 解析模型返回的 JSON，提取动作名
+    validate_action,  # 校验模型选的动作能否执行，不能就兜底
+)
+from backend.app.agent.followup import followup, select_next_field  # 追问节点和字段选择
+from backend.app.agent.intake import intake  # 入口节点，提取字段
+from backend.app.agent.state import ConsultationState  # 状态类型
+from backend.app.tools.registry import TOOL_REGISTRY  # 工具注册表
+
+MAX_FOLLOWUPS = 3  # 普通追问上限，spec 要求的工程边界
 
 
 def risk_check(state: ConsultationState) -> dict:
@@ -29,27 +39,36 @@ def route_after_risk(state: ConsultationState) -> str:
 
 
 def decision(state: ConsultationState) -> dict:
-    """Mock 决策器：用规则代替模型动作选择。
+    """决策节点：模型（或预设）选动作，程序校验后执行。
 
-    停止追问的条件（满足任一即不再追问）：
-    - 追问已到上限
-    - 缺失字段里没有值得问的了（select_next_field 返回 None）
-
-    不追问时：工具没调过 → CALL_TOOL；调过了 → FINALIZE。
-    Day 10 替换为真实模型。
+    用 USE_MODEL 控制调模型还是预设。Key 不可用时自动回退预设。
+    模型选的动作记入 trace；校验后实际执行的动作也记入。
     """
-    under_limit = state.followup_count < MAX_FOLLOWUPS
-    can_ask = select_next_field(state.missing_fields, state.asked_questions) is not None
+    # 根据环境变量决定用模型还是预设：USE_MODEL=1 用模型，否则用预设
+    chooser = model_choose if os.getenv("USE_MODEL") == "1" else mock_choose
 
-    if under_limit and can_ask:
-        next_action = "ASK_FOLLOWUP"
-    elif "department_suggest" not in state.tool_results:
-        next_action = "CALL_TOOL"
-    else:
-        next_action = "FINALIZE"
+    model_choice = None  # 模型选的动作，先置空
+    try:
+        raw = chooser(state)  # 调模型或预设，拿到 JSON 文本
+        model_choice = parse_action(raw)  # 解析 JSON，提取动作名并校验合法性
+    except DecisionError as exc:
+        # 模型不可用或返回无效时，用预设兜底——保证流程不中断
+        raw = mock_choose(state)
+        model_choice = parse_action(raw)
+
+    # 程序校验：模型选的动作能不能执行，不能就兜底
+    final_action = validate_action(model_choice, state, MAX_FOLLOWUPS)
+
     return {
-        "next_action": next_action,
-        "trace": [{"node": "decision", "next_action": next_action}],
+        "next_action": final_action,  # 最终执行的动作，决定走哪条边
+        "trace": [
+            {
+                "node": "decision",
+                "model_choice": model_choice,  # 模型选了什么
+                "final_action": final_action,  # 程序最终执行什么
+                "same": model_choice == final_action,  # 两者是否一致（False 说明被兜底了）
+            }
+        ],
     }
 
 
@@ -68,11 +87,11 @@ def tool(state: ConsultationState) -> dict:
     Day 9：mock 决策器只调 department_suggest。
     Day 10 起模型可选择调用哪个工具。
     """
-    results = dict(state.tool_results)
-    tool_name = "department_suggest"
-    tool_fn = TOOL_REGISTRY[tool_name]
-    result = tool_fn(state.collected_facts)
-    results[tool_name] = result
+    results = dict(state.tool_results)  # 复制已有工具结果，不改原 state
+    tool_name = "department_suggest"  # 要调用的工具名（Day 10 起模型来选）
+    tool_fn = TOOL_REGISTRY[tool_name]  # 从注册表取出对应的函数
+    result = tool_fn(state.collected_facts)  # 调用工具，传入已收集的字段
+    results[tool_name] = result  # 把结构化结果写回字典
     return {
         "tool_results": results,
         "trace": [{"node": "tool", "called": tool_name, "result": result}],
@@ -81,14 +100,14 @@ def tool(state: ConsultationState) -> dict:
 
 def output(state: ConsultationState) -> dict:
     """输出节点：风险路径返回固定提示，正常路径渲染结构化结果。"""
-    if state.risk_flags:
+    if state.risk_flags:  # 命中风险 → 固定提示，不经过工具和决策
         result = "检测到预设风险场景，请立即寻求专业帮助。（规则 R001）"
-    else:
-        dept_result = state.tool_results.get("department_suggest", {})
-        dept = dept_result.get("department")
-        if dept:
+    else:  # 正常路径 → 从工具结果里取科室方向
+        dept_result = state.tool_results.get("department_suggest", {})  # 取工具结果，默认空字典
+        dept = dept_result.get("department")  # 从字典里取科室名
+        if dept:  # 有匹配的科室
             result = f"建议方向：{dept}"
-        else:
+        else:  # 无匹配，不编造
             result = "暂无法判断科室方向"
     return {
         "final_result": result,
@@ -98,28 +117,30 @@ def output(state: ConsultationState) -> dict:
 
 def build_graph():
     """组装并编译问诊状态图。"""
-    graph = StateGraph(ConsultationState)
+    graph = StateGraph(ConsultationState)  # 用 ConsultationState 作为图的状态类型
 
-    graph.add_node("intake", intake)
-    graph.add_node("risk_check", risk_check)
-    graph.add_node("decision", decision)
-    graph.add_node("followup", followup)
-    graph.add_node("tool", tool)
-    graph.add_node("output", output)
+    # 注册六个节点
+    graph.add_node("intake", intake)  # 入口：提取字段
+    graph.add_node("risk_check", risk_check)  # 风险检查
+    graph.add_node("decision", decision)  # 决策：模型或预设选动作
+    graph.add_node("followup", followup)  # 追问：选字段生成问题
+    graph.add_node("tool", tool)  # 工具：调注册表里的受限工具
+    graph.add_node("output", output)  # 输出：渲染最终结果
 
-    graph.add_edge(START, "intake")
-    graph.add_edge("intake", "risk_check")
-    graph.add_conditional_edges("risk_check", route_after_risk)
-    graph.add_conditional_edges("decision", route_after_decision)
-    graph.add_edge("followup", "intake")
-    graph.add_edge("tool", "decision")
-    graph.add_edge("output", END)
+    # 连边
+    graph.add_edge(START, "intake")  # 起点 → 入口
+    graph.add_edge("intake", "risk_check")  # 入口 → 风险检查（固定顺序）
+    graph.add_conditional_edges("risk_check", route_after_risk)  # 风险检查后分路：命中→output，未命中→decision
+    graph.add_conditional_edges("decision", route_after_decision)  # 决策后分路：追问/工具/输出
+    graph.add_edge("followup", "intake")  # 追问 → 回到入口（多轮循环）
+    graph.add_edge("tool", "decision")  # 工具 → 回到决策（循环）
+    graph.add_edge("output", END)  # 输出 → 结束
 
-    return graph.compile()
+    return graph.compile()  # 编译图，返回可调用的 app
 
 
 if __name__ == "__main__":
-    app = build_graph()
+    app = build_graph()  # 编译图
 
     print("=== 普通路径（信息足够，直接调工具）===")
     normal = app.invoke({"latest_user_message": "头部不适两天，前额，程度轻，暂无其他不适"})
