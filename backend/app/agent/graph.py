@@ -14,6 +14,13 @@ from backend.app.agent.decision import (
 )
 from backend.app.agent.followup import followup, select_next_field  # 追问节点和字段选择
 from backend.app.agent.intake import intake  # 入口节点，提取字段
+from backend.app.agent.result import (
+    build_completed_result,
+    build_error_result,
+    build_risk_result,
+    build_vague_result,
+    render_text,
+)
 from backend.app.agent.state import ConsultationState  # 状态类型
 from backend.app.safety.rule_engine import final_check, screen  # 风险检查和最终输出检查
 from backend.app.tools.registry import TOOL_REGISTRY  # 工具注册表
@@ -103,29 +110,35 @@ def tool(state: ConsultationState) -> dict:
 
 
 def output(state: ConsultationState) -> dict:
-    """输出节点：风险/含糊/正常三路输出，最终输出前再检查一次边界。"""
+    """输出节点：生成结构化结果，渲染文案，最终检查边界。"""
     if state.risk_flags:  # 命中风险或含糊
-        rule = state.risk_flags[0]  # 取第一个命中的规则
-        if rule == "V001":  # 含糊表述 → 保守提示，不说确诊
-            result = "您提到的描述存在不确定性，如不确定请尽快寻求专业帮助。"
+        rule = state.risk_flags[0]
+        if rule == "V001":  # 含糊 → 保守提示
+            structured = build_vague_result()
         else:  # 明确风险 → 固定提示
-            result = f"检测到预设风险场景，请立即寻求专业帮助。（规则 {rule}）"
-    else:  # 正常路径 → 从工具结果里取科室方向
-        dept_result = state.tool_results.get("department_suggest", {})  # 取工具结果，默认空字典
-        dept = dept_result.get("department")  # 从字典里取科室名
-        if dept:  # 有匹配的科室
-            result = f"建议方向：{dept}"
-        else:  # 无匹配，不编造
-            result = "暂无法判断科室方向"
+            structured = build_risk_result(rule)
+    else:  # 正常路径 → 已知、未知、工具、下一步
+        structured = build_completed_result(
+            state.collected_facts, state.missing_fields, state.tool_results
+        )
 
-    # 最终输出前再检查一次：防止输出里夹带风险词或越界内容（确诊/处方/剂量/停药）
-    boundary = final_check(result)
+    # 渲染文案（不含 limitations，先检查核心内容）
+    rendered = render_text(structured)
+
+    # 最终检查：只检查系统生成的建议（next_step 和 risk_message），不检查用户原话
+    check_text = structured.get("next_step", "") + " " + (structured.get("risk_message") or "")
+    boundary = final_check(check_text)
     if boundary["level"] != "safe":
-        result = "本系统不提供确诊、处方或用药建议，请咨询专业人员。"
+        structured = build_error_result(boundary["reason"])
+        rendered = "本系统不提供确诊、处方或用药建议，请咨询专业人员。"
+    else:
+        # 检查通过后追加 limitations（说明性文字，不含实际建议）
+        rendered = rendered + "\n\n" + structured.get("limitations", "")
 
     return {
-        "final_result": result,
-        "trace": [{"node": "output", "final": result, "boundary_check": boundary}],
+        "final_result": structured,  # 结构化字典，给测试和前端解析
+        "rendered_text": rendered,  # 渲染文案，给用户直接看
+        "trace": [{"node": "output", "boundary_check": boundary}],
     }
 
 

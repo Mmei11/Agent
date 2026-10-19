@@ -1,10 +1,10 @@
-"""Day 5 最小流程测试：普通路径和风险路径的核心断言。案例均为虚构。"""
+"""Day 5-12 流程测试：普通、风险、追问、否定、含糊、结构化结果。案例均为虚构。"""
 
 from backend.app.agent.graph import build_graph
 
 
 def test_normal_path_calls_tool_then_finalizes():
-    """信息足够时：decision → tool → decision → output，最终有结果。"""
+    """信息足够时：decision → tool → decision → output，最终有结构化结果。"""
     app = build_graph()
     result = app.invoke({
         "latest_user_message": "头部不适两天，前额，程度轻，暂无其他不适，无病史"
@@ -12,7 +12,10 @@ def test_normal_path_calls_tool_then_finalizes():
 
     assert result["risk_flags"] == []
     assert result["tool_results"]["department_suggest"] == {"department": "神经内科"}
-    assert result["final_result"] == "建议方向：神经内科"
+    final = result["final_result"]
+    assert final["status"] == "completed"
+    assert final["tools_used"] == ["department_suggest"]
+    assert "神经内科" in final["next_step"]
 
     nodes = [entry["node"] for entry in result["trace"]]
     assert nodes == [
@@ -32,7 +35,9 @@ def test_risk_path_bypasses_decision():
 
     assert result["risk_flags"] == ["R001"]
     assert "department_suggest" not in result.get("tool_results", {})
-    assert result["final_result"] == "检测到预设风险场景，请立即寻求专业帮助。（规则 R001）"
+    final = result["final_result"]
+    assert final["status"] == "risk_route"
+    assert "R001" in final["risk_message"]
 
     nodes = [entry["node"] for entry in result["trace"]]
     assert nodes == ["intake", "risk_check", "output"]
@@ -47,7 +52,6 @@ def test_followup_path_asks_then_tools():
     assert result["tool_results"]["department_suggest"] == {"department": "神经内科"}
 
     nodes = [entry["node"] for entry in result["trace"]]
-    # 应包含三次 followup，最后走 tool → decision → output
     followup_count = nodes.count("followup")
     assert followup_count == 3
     assert nodes[-2:] == ["decision", "output"]
@@ -60,7 +64,6 @@ def test_low_priority_field_only_one_followup():
         "latest_user_message": "头部不适两天，前额，程度轻，暂无其他不适"
     })
 
-    # 只缺已知背景，问一次后 select_next_field 返回 None，不再追问
     assert result["followup_count"] == 1
     assert result["tool_results"]["department_suggest"] == {"department": "神经内科"}
 
@@ -71,7 +74,6 @@ def test_missing_fields_not_duplicated():
     result = app.invoke({"latest_user_message": "头部不适"})
 
     assert result["missing_fields"] == ["持续时间", "程度", "伴随表现", "已知背景"]
-    # 确保没有重复元素
     assert len(result["missing_fields"]) == len(set(result["missing_fields"]))
 
 
@@ -89,7 +91,9 @@ def test_negation_goes_normal_path():
     app = build_graph()
     result = app.invoke({"latest_user_message": "没有呼吸困难，头部不适两天"})
     assert result["risk_flags"] == []
-    assert result["final_result"] == "建议方向：神经内科"
+    final = result["final_result"]
+    assert final["status"] == "completed"
+    assert "神经内科" in final["next_step"]
 
 
 def test_vague_goes_output_with_hint():
@@ -97,4 +101,6 @@ def test_vague_goes_output_with_hint():
     app = build_graph()
     result = app.invoke({"latest_user_message": "模拟人物好像有点喘"})
     assert "V001" in result["risk_flags"]
-    assert "寻求专业帮助" in result["final_result"]  # 非空
+    final = result["final_result"]
+    assert final["status"] == "risk_route"
+    assert "寻求专业帮助" in final["risk_message"]

@@ -118,3 +118,16 @@
   - 最终输出含风险词→ F001 拦截。
 - **局限**：否定检测只看风险词前 5 字，复杂长句可能漏判；含糊词表有限，不能覆盖所有表述。spec 要求"不声称临床可靠"，这些规则只展示软件如何处理预设输入。
 - **下一步**：Day 12 结构化结果与端到端检查——统一最终结果格式，渲染前做 schema 与边界校验。
+
+## Day 12｜2026-10-19
+
+- **完成项**：实现 `backend/app/agent/result.py`——`ConsultationResult` Pydantic schema（status/known_facts/unknowns/tools_used/next_step/risk_message/limitations）；四个构建函数（completed/risk/vague/error）；`render_text` 渲染文案。更新 graph.py output 节点：生成结构化字典（`final_result`）+ 渲染文案（`rendered_text`），`final_check` 只检查系统生成的 next_step/risk_message，不检查用户原话。state 加 `rendered_text` 字段。
+- **产物**：`backend/app/agent/result.py`、`backend/tests/test_result.py`、更新 `state.py`、`graph.py`、`test_graph.py`。
+- **验收证据**：`pytest backend/tests/` 54 passed。
+  - 正常完成：`final_result.status=completed`，known_facts/unknowns/tools_used/next_step 齐全。
+  - 风险路径：`status=risk_route`，risk_message 含规则编号，next_step 提示急救。
+  - 含糊路径：`status=risk_route`，risk_message 提示寻求帮助。
+  - 错误路径：`status=error`，next_step 含出错原因。
+  - 否定句"没有呼吸困难"→ 正常路径 completed，用户原话不被 final_check 误拦。
+- **里程碑意义**：这是第二个重要里程碑——可在 CLI 运行的完整 MVP。最终结果统一结构化，已知与未知分开呈现，工具调用可追踪，渲染前过 schema 校验和边界检查。
+- **下一步**：Day 13 会话存储与轨迹——用 SQLite 保存最小状态和 trace，支持按 session_id 恢复。

@@ -41,7 +41,10 @@ class ConsultationState(BaseModel):
     next_action: str = ""
 
     # --- 输出 ---
-    final_result: str = ""
+    # final_result：结构化结果字典，给测试和前端解析用
+    final_result: dict = {}
+    # rendered_text：从结构化结果渲染的文案，给用户直接看
+    rendered_text: str = ""
 
     # trace：每一步的执行记录，只增不减
     trace: Annotated[list, operator.add] = []
