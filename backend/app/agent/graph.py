@@ -142,8 +142,12 @@ def output(state: ConsultationState) -> dict:
     }
 
 
-def build_graph():
-    """组装并编译问诊状态图。"""
+def build_graph(checkpointer=None):
+    """组装并编译问诊状态图。
+
+    checkpointer=None 时无持久化（原有行为，不破坏测试）；
+    传入 SqliteSaver 时启用会话持久化，按 thread_id 存储和恢复状态。
+    """
     graph = StateGraph(ConsultationState)  # 用 ConsultationState 作为图的状态类型
 
     # 注册六个节点
@@ -163,30 +167,40 @@ def build_graph():
     graph.add_edge("tool", "decision")  # 工具 → 回到决策（循环）
     graph.add_edge("output", END)  # 输出 → 结束
 
-    return graph.compile()  # 编译图，返回可调用的 app
+    return graph.compile(checkpointer=checkpointer)  # 编译图，传入 checkpointer 启用持久化
 
 
 if __name__ == "__main__":
-    app = build_graph()  # 编译图
+    from backend.app.storage.saver import get_saver
 
-    print("=== 普通路径（信息足够，直接调工具）===")
-    normal = app.invoke({"latest_user_message": "头部不适两天，前额，程度轻，暂无其他不适"})
-    print("最终结果：", normal["final_result"])
-    print("轨迹：")
-    for entry in normal["trace"]:
-        print(" ", entry)
+    # 用 SqliteSaver 启用会话持久化
+    with get_saver() as saver:
+        app = build_graph(checkpointer=saver)
+        config = {"configurable": {"thread_id": "demo-session-1"}}
 
-    print("\n=== 追问路径（信息不足，先追问再调工具）===")
-    followup_result = app.invoke({"latest_user_message": "头部不适"})
-    print("追问：", followup_result.get("asked_questions", []))
-    print("缺失字段：", followup_result.get("missing_fields", []))
-    print("轨迹：")
-    for entry in followup_result["trace"]:
-        print(" ", entry)
+        print("=== 第一轮：用户只说症状 ===")
+        r1 = app.invoke(
+            {"latest_user_message": "头部不适"},
+            config=config,
+        )
+        print("已收集：", r1.get("collected_facts", {}))
+        print("追问过：", r1.get("asked_questions", []))
+        print("缺失：", r1.get("missing_fields", []))
 
-    print("\n=== 风险路径 ===")
-    risk = app.invoke({"latest_user_message": "模拟人物突然呼吸困难"})
-    print("最终结果：", risk["final_result"])
-    print("轨迹：")
-    for entry in risk["trace"]:
-        print(" ", entry)
+        print("\n=== 第二轮：用户补充信息（同一会话）===")
+        r2 = app.invoke(
+            {"latest_user_message": "前两天开始的，在前额"},
+            config=config,  # 同一个 thread_id → 自动恢复第一轮的状态
+        )
+        print("已收集：", r2.get("collected_facts", {}))
+        print("追问过：", r2.get("asked_questions", []))
+        print("最终结果：", r2.get("final_result", {}))
+
+        print("\n=== 不同会话互不污染 ===")
+        r3 = app.invoke(
+            {"latest_user_message": "腹痛三天"},
+            config={"configurable": {"thread_id": "demo-session-2"}},
+        )
+        print("会话2 已收集：", r3.get("collected_facts", {}))
+        # 会话2 不应该看到会话1 的"头部不适"
+        assert "头部不适" not in str(r3.get("collected_facts", {}))

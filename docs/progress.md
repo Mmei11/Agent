@@ -131,3 +131,14 @@
   - 否定句"没有呼吸困难"→ 正常路径 completed，用户原话不被 final_check 误拦。
 - **里程碑意义**：这是第二个重要里程碑——可在 CLI 运行的完整 MVP。最终结果统一结构化，已知与未知分开呈现，工具调用可追踪，渲染前过 schema 校验和边界检查。
 - **下一步**：Day 13 会话存储与轨迹——用 SQLite 保存最小状态和 trace，支持按 session_id 恢复。
+
+## Day 13｜2026-10-19
+
+- **完成项**：实现 `backend/app/storage/saver.py`——`get_saver` 工厂函数返回 SqliteSaver 上下文管理器；`build_graph` 加 `checkpointer` 参数，传入时启用持久化；`__main__` 改为多轮会话恢复演示；创建 `backend/app/storage/__init__.py` 使其成为 Python 包。
+- **产物**：`backend/app/storage/__init__.py`、`backend/app/storage/saver.py`、`backend/tests/test_storage.py`、更新 `graph.py`。
+- **验收证据**：`pytest backend/tests/` 57 passed。
+  - 同一 thread_id 两轮 invoke：第二轮 collected_facts 含第一轮的"头部不适" + 第二轮的"两天"，状态恢复成功。
+  - 不同 thread_id 互不污染：会话2 不含会话1 的"头部不适"。
+  - 关闭 saver 再新建（模拟重启）：从 SQLite 读回状态，会话恢复成功。
+  - `consultations.sqlite` 文件经 `git check-ignore` 确认被忽略。
+- **下一步**：Day 14 FastAPI 接口——提供 POST /sessions、POST /sessions/{id}/messages、GET /sessions/{id}、DELETE /sessions/{id}。
