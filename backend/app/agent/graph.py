@@ -15,24 +15,28 @@ from backend.app.agent.decision import (
 from backend.app.agent.followup import followup, select_next_field  # 追问节点和字段选择
 from backend.app.agent.intake import intake  # 入口节点，提取字段
 from backend.app.agent.state import ConsultationState  # 状态类型
+from backend.app.safety.rule_engine import final_check, screen  # 风险检查和最终输出检查
 from backend.app.tools.registry import TOOL_REGISTRY  # 工具注册表
 
 MAX_FOLLOWUPS = 3  # 普通追问上限，spec 要求的工程边界
 
 
 def risk_check(state: ConsultationState) -> dict:
-    """预设风险检查：命中时设置 risk_flags，后续条件边把普通流程旁路。"""
+    """风险检查：对用户消息做风险筛查。命中风险走固定分支，含糊标记不确定。"""
+    result = screen(state.latest_user_message)  # 调安全模块检查
     flags = []
-    if "呼吸困难" in state.latest_user_message:
-        flags.append("R001")
+    if result["level"] == "risk":
+        flags.append(result["rule"])  # 命中风险 → R001
+    elif result["level"] == "vague":
+        flags.append(result["rule"])  # 含糊 → V001，保守分流
     return {
         "risk_flags": flags,
-        "trace": [{"node": "risk_check", "flags": flags}],
+        "trace": [{"node": "risk_check", "screen_result": result}],
     }
 
 
 def route_after_risk(state: ConsultationState) -> str:
-    """命中风险直接走向输出节点渲染固定提示；否则进入正常决策。"""
+    """命中风险或含糊直接走向输出；否则进入正常决策。"""
     if state.risk_flags:
         return "output"
     return "decision"
@@ -99,9 +103,13 @@ def tool(state: ConsultationState) -> dict:
 
 
 def output(state: ConsultationState) -> dict:
-    """输出节点：风险路径返回固定提示，正常路径渲染结构化结果。"""
-    if state.risk_flags:  # 命中风险 → 固定提示，不经过工具和决策
-        result = "检测到预设风险场景，请立即寻求专业帮助。（规则 R001）"
+    """输出节点：风险/含糊/正常三路输出，最终输出前再检查一次边界。"""
+    if state.risk_flags:  # 命中风险或含糊
+        rule = state.risk_flags[0]  # 取第一个命中的规则
+        if rule == "V001":  # 含糊表述 → 保守提示，不说确诊
+            result = "您提到的描述存在不确定性，如不确定请尽快寻求专业帮助。"
+        else:  # 明确风险 → 固定提示
+            result = f"检测到预设风险场景，请立即寻求专业帮助。（规则 {rule}）"
     else:  # 正常路径 → 从工具结果里取科室方向
         dept_result = state.tool_results.get("department_suggest", {})  # 取工具结果，默认空字典
         dept = dept_result.get("department")  # 从字典里取科室名
@@ -109,9 +117,15 @@ def output(state: ConsultationState) -> dict:
             result = f"建议方向：{dept}"
         else:  # 无匹配，不编造
             result = "暂无法判断科室方向"
+
+    # 最终输出前再检查一次：防止输出里夹带风险词或越界内容（确诊/处方/剂量/停药）
+    boundary = final_check(result)
+    if boundary["level"] != "safe":
+        result = "本系统不提供确诊、处方或用药建议，请咨询专业人员。"
+
     return {
         "final_result": result,
-        "trace": [{"node": "output", "final": result}],
+        "trace": [{"node": "output", "final": result, "boundary_check": boundary}],
     }
 
 

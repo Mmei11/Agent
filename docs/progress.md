@@ -105,3 +105,16 @@
   - 模型不可用时自动回退预设决策器。
 - **里程碑意义**：这是第一个重要里程碑——Agent 现在可以自主选择动作。模型负责在 ASK_FOLLOWUP / CALL_TOOL / FINALIZE 中"提"，程序负责"判"（校验和兜底）。风险门控先于 decision，模型碰不到。trace 同时记录模型选择和最终执行，可从轨迹解释每步决策依据。
 - **下一步**：Day 11 风险门控与输出边界——完善风险检查规则，处理否定句、含糊表述和跨轮补充。
+
+## Day 11｜2026-10-19
+
+- **完成项**：实现 `backend/app/safety/rule_engine.py`——`screen` 三级检查（风险词命中→risk、含糊表述→vague、安全→safe）；`check_negation` 检查风险词前面 5 字内有无否定词，否定句不误判；`final_check` 在输出前检查风险词和越界内容（确诊/处方/剂量/停药）。更新 graph.py：risk_check 节点调 `screen`，output 节点调 `final_check`，含糊走保守提示分支。
+- **产物**：`backend/app/safety/rule_engine.py`、`backend/tests/test_safety.py`、更新 `graph.py` 和 `test_graph.py`。
+- **验收证据**：`pytest backend/tests/` 46 passed。
+  - 否定句"没有呼吸困难"→ safe，走正常路径调工具，不误分流。
+  - 含糊"好像有点喘"→ vague（V001），走输出提示"寻求专业帮助"。
+  - 肯定"突然呼吸困难"→ risk（R001），走固定提示。
+  - 最终输出含"确诊"/"处方"/"剂量"/"停药"→ F002 拦截，替换为边界提示。
+  - 最终输出含风险词→ F001 拦截。
+- **局限**：否定检测只看风险词前 5 字，复杂长句可能漏判；含糊词表有限，不能覆盖所有表述。spec 要求"不声称临床可靠"，这些规则只展示软件如何处理预设输入。
+- **下一步**：Day 12 结构化结果与端到端检查——统一最终结果格式，渲染前做 schema 与边界校验。

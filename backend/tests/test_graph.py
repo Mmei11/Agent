@@ -81,4 +81,20 @@ def test_no_infinite_loop():
     for message in ["头部不适", "", "呼吸困难", "头痛三天严重恶心"]:
         result = app.invoke({"latest_user_message": message})
         assert "final_result" in result
-        assert result["final_result"]  # 非空
+        assert result["final_result"]
+
+
+def test_negation_goes_normal_path():
+    """否定句'没有呼吸困难'不命中风险，走正常路径。"""
+    app = build_graph()
+    result = app.invoke({"latest_user_message": "没有呼吸困难，头部不适两天"})
+    assert result["risk_flags"] == []
+    assert result["final_result"] == "建议方向：神经内科"
+
+
+def test_vague_goes_output_with_hint():
+    """含糊表述'有点喘'走输出，提示寻求专业帮助。"""
+    app = build_graph()
+    result = app.invoke({"latest_user_message": "模拟人物好像有点喘"})
+    assert "V001" in result["risk_flags"]
+    assert "寻求专业帮助" in result["final_result"]  # 非空
