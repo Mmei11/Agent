@@ -56,7 +56,10 @@ def intake(state: ConsultationState) -> dict:
 
     return {
         "turn_id": state.turn_id + 1,
+        "conversation": [{"role": "user", "text": message}],
         "collected_facts": collected,
         "missing_fields": missing,
+        "final_result": {},
+        "rendered_text": "",
         "trace": [{"node": "intake", "extracted": new_facts, "missing": missing}],
     }

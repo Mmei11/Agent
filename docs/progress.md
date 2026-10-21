@@ -142,3 +142,27 @@
   - 关闭 saver 再新建（模拟重启）：从 SQLite 读回状态，会话恢复成功。
   - `consultations.sqlite` 文件经 `git check-ignore` 确认被忽略。
 - **下一步**：Day 14 FastAPI 接口——提供 POST /sessions、POST /sessions/{id}/messages、GET /sessions/{id}、DELETE /sessions/{id}。
+
+## Day 14｜2026-10-19
+
+- **完成项**：实现 `backend/app/api/routes.py`——FastAPI 四个接口（POST /sessions 创建会话、POST /sessions/{id}/messages 发消息、GET /sessions/{id} 查状态、DELETE /sessions/{id} 删除）；Pydantic 请求/响应 schema（CreateSessionRequest、SendMessageRequest、SessionResponse）；全局 SQLite 连复用（`check_same_thread=False`）；空消息不调图直接返回空状态；未知会话返回 404。
+- **产物**：`backend/app/api/__init__.py`、`backend/app/api/routes.py`、`backend/tests/test_api.py`。
+- **验收证据**：`pytest backend/tests/` 65 passed。
+  - 创建空会话：followup_count=0，collected_facts 为空。
+  - 创建带初始消息会话："头部不适"被提取到 collected_facts。
+  - 连续发消息：第二轮看到第一轮的"头部不适" + 第二轮的"两天"。
+  - 空消息：400 错误。
+  - 未知会话：404 错误。
+  - 风险输入"呼吸困难"：R001 出现在 risk_flags。
+- **下一步**：Day 15 React 单页界面——输入框、对话区、追问状态、最终结果卡片。
+
+## Day 15｜2026-10-19
+
+- **完成项**：创建 React + Vite + JavaScript 前端——`App.jsx` 主组件（输入框、对话区、状态区、结果卡片、重新开始按钮）；3 个模拟案例快捷入口（动态追问、信息足够、预设风险）；session_id 存 localStorage 并 30 分钟过期；Vite 代理 `/sessions` 到后端 8000 端口；`styles.css` 样式（手机和桌面宽度适配）。
+- **产物**：`frontend/index.html`、`frontend/package.json`、`frontend/vite.config.js`、`frontend/src/main.jsx`、`frontend/src/App.jsx`、`frontend/src/styles.css`、`frontend/README.md`。
+- **验收证据**：
+  - `npm install` 成功，`npm run dev` 启动 Vite 开发服务器。
+  - 后端 `uvicorn` 启动，API 返回正确结构化数据。
+  - 前端 `/sessions` 请求通过 Vite 代理转发到后端 8000 端口。
+  - 后端 65 tests all passed，前端服务正常运行。
+- **下一步**：Day 16 建立基线与评测集——扩成至少 30 条模拟案例。

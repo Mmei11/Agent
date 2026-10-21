@@ -19,6 +19,8 @@ class ConsultationState(BaseModel):
 
     # --- 用户输入 ---
     latest_user_message: str = ""
+    # 对话按轮追加，供刷新页面时从 SQLite 检查点恢复。
+    conversation: Annotated[list, operator.add] = []
 
     # --- 信息收集 ---
     # collected_facts：{"症状": "头痛", "部位": "前额", ...}
@@ -34,7 +36,7 @@ class ConsultationState(BaseModel):
 
     # --- 追踪与控制 ---
     followup_count: int = 0
-    risk_flags: Annotated[list, operator.add] = []  # 可追加
+    risk_flags: list = []  # 每轮风险筛查覆盖上轮结果
     tool_results: dict = {}
 
     # next_action：决策节点选出的动作

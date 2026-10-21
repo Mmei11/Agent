@@ -3,6 +3,7 @@
 from backend.app.agent.followup import generate_question, select_next_field
 from backend.app.agent.state import ConsultationState
 from backend.app.agent.graph import build_graph
+from backend.app.storage.saver import get_saver
 
 
 def test_select_by_priority():
@@ -43,11 +44,16 @@ def test_generate_question_for_none():
     assert "整理结果" in q
 
 
-def test_followup_dedup_in_graph():
-    """图里追问三次不重复问同一字段。"""
-    app = build_graph()
-    result = app.invoke({"latest_user_message": "头部不适"})
-    questions = result.get("asked_questions", [])
-    assert len(questions) == 3
-    # 三个问题各不相同
-    assert len(set(questions)) == 3
+def test_followup_dedup_in_graph(tmp_path):
+    """跨三轮追问，每轮一个问题且不重复。"""
+    with get_saver(str(tmp_path / "followups.sqlite")) as saver:
+        app = build_graph(checkpointer=saver)
+        config = {"configurable": {"thread_id": "followups"}}
+        for _ in range(3):
+            result = app.invoke({"latest_user_message": "头部不适"}, config=config)
+        questions = result["asked_questions"]
+        assert len(questions) == 3
+        assert len(set(questions)) == 3
+        assert result["final_result"] == {}
+        completed = app.invoke({"latest_user_message": "暂时说不清"}, config=config)
+        assert completed["final_result"]["status"] == "completed"

@@ -59,6 +59,7 @@ def followup(state: ConsultationState) -> dict:
     return {
         "followup_count": state.followup_count + 1,
         "asked_questions": [question],
+        "conversation": [{"role": "agent", "text": question}],
         "trace": [
             {
                 "node": "followup",

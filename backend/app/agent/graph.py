@@ -138,6 +138,7 @@ def output(state: ConsultationState) -> dict:
     return {
         "final_result": structured,  # 结构化字典，给测试和前端解析
         "rendered_text": rendered,  # 渲染文案，给用户直接看
+        "conversation": [{"role": "agent", "text": rendered}],
         "trace": [{"node": "output", "boundary_check": boundary}],
     }
 
@@ -163,7 +164,7 @@ def build_graph(checkpointer=None):
     graph.add_edge("intake", "risk_check")  # 入口 → 风险检查（固定顺序）
     graph.add_conditional_edges("risk_check", route_after_risk)  # 风险检查后分路：命中→output，未命中→decision
     graph.add_conditional_edges("decision", route_after_decision)  # 决策后分路：追问/工具/输出
-    graph.add_edge("followup", "intake")  # 追问 → 回到入口（多轮循环）
+    graph.add_edge("followup", END)  # 一次请求只追问一次，等待用户下一轮回答
     graph.add_edge("tool", "decision")  # 工具 → 回到决策（循环）
     graph.add_edge("output", END)  # 输出 → 结束
 

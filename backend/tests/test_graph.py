@@ -1,6 +1,7 @@
 """Day 5-12 流程测试：普通、风险、追问、否定、含糊、结构化结果。案例均为虚构。"""
 
 from backend.app.agent.graph import build_graph
+from backend.app.storage.saver import get_saver
 
 
 def test_normal_path_calls_tool_then_finalizes():
@@ -43,29 +44,35 @@ def test_risk_path_bypasses_decision():
     assert nodes == ["intake", "risk_check", "output"]
 
 
-def test_followup_path_asks_then_tools():
-    """追问路径：信息不足时先追问，达到上限后调工具结束。"""
-    app = build_graph()
-    result = app.invoke({"latest_user_message": "头部不适"})
+def test_followup_path_asks_then_tools(tmp_path):
+    """每条请求只问一次；三轮后在下一次回答时整理结果。"""
+    with get_saver(str(tmp_path / "graph.sqlite")) as saver:
+        app = build_graph(checkpointer=saver)
+        config = {"configurable": {"thread_id": "followup-path"}}
+        first = app.invoke({"latest_user_message": "头部不适"}, config=config)
+        assert first["followup_count"] == 1
+        assert first["final_result"] == {}
+        assert len(first["conversation"]) == 2
 
-    assert result["followup_count"] == 3
-    assert result["tool_results"]["department_suggest"] == {"department": "神经内科"}
+        app.invoke({"latest_user_message": "前两天开始的"}, config=config)
+        third = app.invoke({"latest_user_message": "在前额"}, config=config)
+        assert third["followup_count"] == 3
+        assert third["final_result"] == {}
+        result = app.invoke({"latest_user_message": "程度轻"}, config=config)
+        assert result["tool_results"]["department_suggest"] == {"department": "神经内科"}
+        assert result["final_result"]["status"] == "completed"
 
-    nodes = [entry["node"] for entry in result["trace"]]
-    followup_count = nodes.count("followup")
-    assert followup_count == 3
-    assert nodes[-2:] == ["decision", "output"]
 
-
-def test_low_priority_field_only_one_followup():
-    """只缺低优先级字段：问一次后不再追问，直接调工具。"""
-    app = build_graph()
-    result = app.invoke({
-        "latest_user_message": "头部不适两天，前额，程度轻，暂无其他不适"
-    })
-
-    assert result["followup_count"] == 1
-    assert result["tool_results"]["department_suggest"] == {"department": "神经内科"}
+def test_low_priority_field_only_one_followup(tmp_path):
+    """只缺背景时先问一次，用户回答后才整理结果。"""
+    with get_saver(str(tmp_path / "one-followup.sqlite")) as saver:
+        app = build_graph(checkpointer=saver)
+        config = {"configurable": {"thread_id": "one-followup"}}
+        first = app.invoke({"latest_user_message": "头部不适两天，前额，程度轻，暂无其他不适"}, config=config)
+        assert first["followup_count"] == 1
+        assert first["final_result"] == {}
+        result = app.invoke({"latest_user_message": "无病史"}, config=config)
+        assert result["tool_results"]["department_suggest"] == {"department": "神经内科"}
 
 
 def test_missing_fields_not_duplicated():
@@ -78,18 +85,18 @@ def test_missing_fields_not_duplicated():
 
 
 def test_no_infinite_loop():
-    """任意输入都不会死循环：最终都到达 output。"""
+    """任意输入都在有限步骤内追问或输出。"""
     app = build_graph()
     for message in ["头部不适", "", "呼吸困难", "头痛三天严重恶心"]:
         result = app.invoke({"latest_user_message": message})
-        assert "final_result" in result
-        assert result["final_result"]
+        assert len(result["trace"]) <= 10
+        assert result["final_result"] or result["asked_questions"]
 
 
 def test_negation_goes_normal_path():
     """否定句'没有呼吸困难'不命中风险，走正常路径。"""
     app = build_graph()
-    result = app.invoke({"latest_user_message": "没有呼吸困难，头部不适两天"})
+    result = app.invoke({"latest_user_message": "没有呼吸困难，头部不适两天，前额，程度轻，暂无其他不适，无病史"})
     assert result["risk_flags"] == []
     final = result["final_result"]
     assert final["status"] == "completed"
