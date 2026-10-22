@@ -75,6 +75,17 @@ def test_validate_allows_model_when_correct():
     assert final == "ASK_FOLLOWUP"
 
 
+def test_validate_stops_followup_after_explicit_refusal():
+    """用户明确拒绝补充时，不再提出普通追问，改为受限工具收束。"""
+    state = ConsultationState(
+        latest_user_message="拒绝补充更多信息",
+        missing_fields=["持续时间", "部位"],
+        followup_count=1,
+    )
+    final = validate_action("ASK_FOLLOWUP", state, max_followups=3)
+    assert final == "CALL_TOOL"
+
+
 def test_parse_action_rejects_unknown():
     """模型返回未知动作 → 抛异常。"""
     from backend.app.agent.decision import DecisionError

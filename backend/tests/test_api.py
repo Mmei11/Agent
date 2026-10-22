@@ -105,6 +105,42 @@ def test_risk_path_through_api():
     assert "R001" in data["risk_flags"]
 
 
+def test_declining_followup_finishes_without_another_question():
+    created = client.post("/sessions", json={"initial_message": "头部不适"}).json()
+    sid = created["session_id"]
+
+    response = client.post(
+        f"/sessions/{sid}/messages", json={"message": "拒绝补充更多信息"}
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["final_result"]["status"] == "completed"
+    assert data["followup_count"] == 1
+    assert len(data["asked_questions"]) == 1
+
+
+def test_tool_timeout_returns_structured_error(monkeypatch):
+    from backend.app.tools import registry
+
+    def timeout_tool(facts):
+        raise TimeoutError("simulated timeout")
+
+    monkeypatch.setitem(registry.TOOL_REGISTRY, "department_suggest", timeout_tool)
+    response = client.post(
+        "/sessions",
+        json={
+            "initial_message": "头部不适两天，前额，程度轻，暂无其他不适，无病史"
+        },
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["final_result"]["status"] == "error"
+    assert "工具执行失败" in data["final_result"]["next_step"]
+    assert "TimeoutError" in data["rendered_text"]
+
+
 def test_risk_session_is_terminal_and_new_case_is_independent():
     risk = client.post("/sessions", json={"initial_message": "模拟人物突然呼吸困难"}).json()
     risk_id = risk["session_id"]

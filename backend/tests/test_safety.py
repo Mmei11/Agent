@@ -10,6 +10,18 @@ def test_risk_keyword_hit():
     assert result["rule"] == "R001"
 
 
+def test_day18_risk_phrase_variants_route():
+    """Day 18：评测集中的胸痛、意识不清和大量出血表达走风险分支。"""
+    for message in [
+        "模拟人物突然胸口剧烈疼痛",
+        "模拟人物突然意识不清",
+        "模拟人物大量出血不止",
+    ]:
+        result = screen(message)
+        assert result["level"] == "risk"
+        assert result["rule"] == "R001"
+
+
 def test_negation_not_risk():
     """否定句不命中：'没有呼吸困难' 前面有否定词。"""
     result = screen("模拟人物没有呼吸困难")
@@ -25,6 +37,13 @@ def test_negation_at_sentence_start():
 def test_vague_expression():
     """含糊表述：'有点喘' 标记为 vague，保守提示。"""
     result = screen("模拟人物好像有点喘")
+    assert result["level"] == "vague"
+    assert result["rule"] == "V001"
+
+
+def test_day18_vague_description_routes_conservatively():
+    """Day 18：难以描述的突发不适按含糊输入保守分流。"""
+    result = screen("似乎突然不太对劲，但无法描述")
     assert result["level"] == "vague"
     assert result["rule"] == "V001"
 

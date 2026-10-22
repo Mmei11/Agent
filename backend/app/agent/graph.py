@@ -101,7 +101,23 @@ def tool(state: ConsultationState) -> dict:
     results = dict(state.tool_results)  # 复制已有工具结果，不改原 state
     tool_name = "department_suggest"  # 要调用的工具名（Day 10 起模型来选）
     tool_fn = TOOL_REGISTRY[tool_name]  # 从注册表取出对应的函数
-    result = tool_fn(state.collected_facts)  # 调用工具，传入已收集的字段
+    try:
+        result = tool_fn(state.collected_facts)  # 调用工具，传入已收集的字段
+    except Exception as exc:
+        # 工具异常写成结构化错误，不让异常直接变成 API 500。
+        error_message = f"{tool_name} 工具执行失败（{type(exc).__name__}）"
+        results[tool_name] = {"error": error_message}
+        return {
+            "tool_results": results,
+            "trace": [
+                {
+                    "node": "tool",
+                    "called": tool_name,
+                    "error_type": type(exc).__name__,
+                    "error": error_message,
+                }
+            ],
+        }
     results[tool_name] = result  # 把结构化结果写回字典
     return {
         "tool_results": results,
@@ -111,12 +127,23 @@ def tool(state: ConsultationState) -> dict:
 
 def output(state: ConsultationState) -> dict:
     """输出节点：生成结构化结果，渲染文案，最终检查边界。"""
+    tool_error = next(
+        (
+            result["error"]
+            for result in state.tool_results.values()
+            if isinstance(result, dict) and result.get("error")
+        ),
+        None,
+    )
     if state.risk_flags:  # 命中风险或含糊
         rule = state.risk_flags[0]
         if rule == "V001":  # 含糊 → 保守提示
             structured = build_vague_result()
         else:  # 明确风险 → 固定提示
             structured = build_risk_result(rule)
+    elif tool_error:
+        # 工具节点报告了异常时，输出统一的结构化 error 结果。
+        structured = build_error_result(tool_error)
     else:  # 正常路径 → 已知、未知、工具、下一步
         structured = build_completed_result(
             state.collected_facts, state.missing_fields, state.tool_results

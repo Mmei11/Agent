@@ -27,6 +27,23 @@ class DecisionError(RuntimeError):
     """决策器产生的可安全显示的错误。"""
 
 
+FOLLOWUP_DECLINE_PHRASES = (
+    "拒绝补充",
+    "拒绝回答",
+    "不愿补充",
+    "不愿回答",
+    "不想补充",
+    "不想回答",
+    "不想继续说",
+    "不再补充",
+)
+
+
+def user_declined_followup(message: str) -> bool:
+    """Detect explicit refusal phrases so the graph can stop ordinary follow-up."""
+    return any(phrase in message for phrase in FOLLOWUP_DECLINE_PHRASES)
+
+
 def load_env_file() -> None:
     """读取项目根目录的 .env；终端已有同名变量时以终端为准。"""
     from pathlib import Path
@@ -124,6 +141,9 @@ def validate_action(model_choice: str, state: ConsultationState, max_followups: 
     tool_called = "department_suggest" in state.tool_results  # 工具已经调过了
 
     if model_choice == "ASK_FOLLOWUP":
+        # 用户明确拒答时，尊重拒答并收束；工具尚未运行则继续做受限整理。
+        if user_declined_followup(state.latest_user_message):
+            return "FINALIZE" if tool_called else "CALL_TOOL"
         if under_limit and can_ask:  # 没到上限且还有可问的 → 放行
             return "ASK_FOLLOWUP"
         # 模型想追问但没有可问的了 → 兜底

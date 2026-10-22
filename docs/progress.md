@@ -183,3 +183,12 @@
 - **已发现问题**：E018–E020 的风险表述没有匹配当前 R001 词表，进入普通追问；E026 没有匹配 V001 词表；E015 用户明确拒绝后仍被继续追问；E031 工具超时导致 HTTP 500，未生成结构化 `error` 结果。E030 空工具结果可安全输出“暂无法判断”。详见生成报告。
 - **评测边界**：本次使用确定性 mock 决策器，检验应用控制流和故障退路，不评测真实模型动作质量或临床正确性。未在本日修复上述应用行为，保留为 Day 18 按失败类型修复与复测的输入。
 - **下一步**：Day 18 修复风险覆盖、拒答停止条件和工具超时退路；同一案例集前后对比并记录剩余失败。
+
+## Day 18｜2026-10-22
+
+- **完成项**：补充预设风险表达“胸口剧烈疼痛”“意识不清”“大量出血不止”和含糊表达；动作校验识别明确拒答并停止普通追问；工具节点捕获异常并在输出节点生成结构化 `error`。修正 E031 描述，使案例与实际注入的 `department_suggest` 超时一致。
+- **产物**：更新 `backend/app/safety/rule_engine.py`、`backend/app/agent/decision.py`、`backend/app/agent/graph.py`；补充 `backend/tests/` 回归覆盖；更新 `eval/cases.jsonl`；新增 `docs/eval-report.md`。
+- **验收证据**：`UV_CACHE_DIR=/private/tmp/agent-uv-cache uv run --offline python -m pytest backend/tests/`：72 passed。`uv run python -m eval.run_eval` 三次独立运行均为 33/33 通过；Day 17 的 6 条失败（E015、E018–E020、E026、E031）全部通过复测。每轮均使用 mock 决策器，外部模型调用数为 0。
+- **复测指标**：三轮平均每案例执行耗时分别为 0.0137s、0.0108s、0.0106s；该耗时包含本地 API/SQLite，不含模型网络调用。详见 `docs/eval-report.md`。
+- **剩余限制**：风险词和拒答表达仍基于有限词表；验证范围仅限固定模拟集。未对真实模型输出做重复采样或质量评估。
+- **下一步**：Day 19 整理 README、架构说明、可复现运行与演示脚本。
