@@ -34,5 +34,20 @@ Each JSONL object contains:
 - `human_review`
 
 Expected action descriptions can be semantic when the case tests a family of
-valid trajectories. Day 17 will turn these contracts into executable checks
-for the application entry point and add controlled fault injection.
+valid trajectories. The Day 17 runner applies executable software-behavior
+checks to the application entry point, with controlled tool fault injection.
+
+## Day 17 Agent runner
+
+Run the case set through FastAPI and the persisted graph with the deterministic
+mock decision policy. The runner injects an empty tool result and a timeout for
+the two tool-failure cases, and reopens SQLite during the recovery cases.
+
+```sh
+uv run python -m eval.run_eval
+```
+
+The runner writes `eval/results/agent-eval-results.jsonl` and
+`eval/results/agent-eval-report.md`. It inspects the persisted graph trace to
+check routing and tool use. Failures are recorded per case; the command exits
+nonzero if any case fails.
