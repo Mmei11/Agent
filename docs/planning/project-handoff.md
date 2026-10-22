@@ -1,6 +1,6 @@
 # 智能问诊 Agent 新项目交接说明
 
-> 更新于 2026-10-08。此文件用于把当前讨论转入一个**独立于 RAG 项目**的新工作区或新对话。完整日程见同目录的《医疗问诊Agent-20天开发计划.md》。
+> 更新于 2026-10-08。此文件用于把当时的讨论转入一个**独立于 RAG 项目**的新工作区或新对话。完整日程见同目录的 [20 天开发计划](20-day-plan.md)。
 
 ## 1. 已确定的决策
 
@@ -42,7 +42,7 @@
 
 ## 3. 新项目开始时的第一步
 
-1. 在新项目中读取完整计划文档：`/Users/meijinchao/Documents/Agent/医疗问诊Agent-20天开发计划.md`。
+1. 在新项目中读取完整计划文档：`docs/planning/20-day-plan.md`。
 2. 确认新工作目录是独立目录；不要在 `/Users/meijinchao/.codex/worktrees/fac6/rag-knowledge` 中创建问诊项目文件。
 3. 从 **Day 1** 开始：阅读 AgentGuide 基础章节，在 `learning/agent-basics.md` 写一页概念笔记和两条虚构病例的手工状态轨迹；无需克隆参考仓库或配置 API Key。
 4. 按日程执行；每一天先解释当天要学的 Agent 概念，再动手实现，最后用当天验收标准检查。用户希望自己理解并从零开发，不希望只得到大段自动生成代码。
@@ -53,8 +53,8 @@
 ```text
 我要在这个全新的项目目录，从零开发“智能问诊与症状分析 Agent”求职作品。请先读取这两个交接文件：
 
-1. /Users/meijinchao/Documents/Agent/医疗问诊Agent-20天开发计划.md
-2. /Users/meijinchao/Documents/Agent/新项目交接说明.md
+1. docs/planning/20-day-plan.md
+2. docs/planning/project-handoff.md
 
 背景：我已有独立 RAG 项目，但 Agent 近乎零基础。开发周期是 20 天，每天约 3～4 小时。阶段 A 先学 Agent 概念、手写最小 Loop、再接模型 API；SmartMedicalConsultation 仅作为可选的后期对照，不克隆复现。AgentGuide 提供学习与评测路线。自研技术栈按计划文档 1.4 节执行：Python 3.11、LangGraph、Pydantic 2、FastAPI、SQLite、React + Vite + JavaScript、单一模型 API 适配层，测试用 pytest 和自写评测脚本；Day 4 固定兼容的依赖版本。请从 Day 1 开始，按“概念解释 → 我动手实现 → 验收和复盘”的节奏协作，不要直接把参考仓库代码复制成我的作品。项目只用模拟病例做求职演示，不提供真实医疗诊断或用药指导。请先检查本项目目录状态，再给我 Day 1 的具体操作，并在我运行时协助排错。
 ```

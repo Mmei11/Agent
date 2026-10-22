@@ -159,7 +159,7 @@
 ## Day 15｜2026-10-19
 
 - **完成项**：创建 React + Vite + JavaScript 前端——`App.jsx` 主组件（输入框、对话区、状态区、结果卡片、重新开始按钮）；3 个模拟案例快捷入口（动态追问、信息足够、预设风险）；session_id 存 localStorage 并 30 分钟过期；Vite 代理 `/sessions` 到后端 8000 端口；`styles.css` 样式（手机和桌面宽度适配）。
-- **产物**：`frontend/index.html`、`frontend/package.json`、`frontend/vite.config.js`、`frontend/src/main.jsx`、`frontend/src/App.jsx`、`frontend/src/styles.css`、`frontend/README.md`。
+- **产物**：`frontend/index.html`、`frontend/package.json`、`frontend/vite.config.js`、`frontend/src/main.jsx`、`frontend/src/App.jsx`、`frontend/src/styles.css`、`frontend/README.md`；[Day 15 界面预览](assets/day15-preview.png)。
 - **验收证据**：
   - `npm install` 成功，`npm run dev` 启动 Vite 开发服务器。
   - 后端 `uvicorn` 启动，API 返回正确结构化数据。
