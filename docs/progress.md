@@ -196,9 +196,9 @@
 ## Day 19–20｜2026-10-23
 
 - **完成项**：完成 README 的最终状态、运行方式、评测边界与学习来源索引；新增 4 分钟录屏流程、30 秒／2 分钟项目介绍和面试问答脚本。按最终验收流程复跑后端测试与案例评测，构建前端，并检查 Compose 配置、忽略规则和真实 HTTP 调用链路。
-- **产物**：`README.md`、`docs/demo-script.md`、本进度记录；项目版本为 `0.1.0`。
-- **验收证据**：`UV_CACHE_DIR=/private/tmp/agent-uv-cache uv run --offline python -m pytest backend/tests/`：72 passed；同一离线环境运行 `uv run --offline python -m eval.run_eval`：33/33 通过；在 `frontend/` 执行 `npm run build` 成功；`docker compose config --quiet` 成功。另以临时 SQLite 和 `USE_MODEL=0` 启动本机后端及 Vite，前端首页返回 HTTP 200，`/sessions` 代理请求成功创建虚构会话。
+- **产物**：`README.md`、`docs/demo-script.md`、本进度记录；项目版本为 `0.1.0`，本地标签为 `v0.1.0`。
+- **验收证据**：全新环境 `UV_PROJECT_ENVIRONMENT=/private/tmp/agent-day19-clean-venv uv sync --locked` 安装成功；在该环境运行后端测试为 72 passed，运行 `eval.run_eval` 为 33/33 通过；在 `frontend/` 执行 `npm run build` 成功；`docker compose config --quiet` 成功。随后用 `FRONTEND_PORT=18080 USE_MODEL=0 docker compose -p agent-day19-20-check up --build -d` 完成前后端镜像构建及启动，后端健康检查通过；首页、`/openapi.json` 和创建虚构会话请求均返回 HTTP 200。验收完成后已移除隔离容器、网络和临时数据卷。
 - **仓库检查**：已检查 Git 跟踪文件，没有 `.env` 或 SQLite 会话数据库；`.env`、SQLite、评测输出和前端构建目录由 `.gitignore` 排除。评测只使用虚构案例与 mock 决策器。
-- **环境限制**：干净虚拟环境的离线安装未能完成，当前 uv 缓存缺少锁定版本的 `pydantic-core==2.50.1` macOS wheel。容器启动也未能完成：Docker 构建需从 Docker Hub 拉取 `node:20-alpine`，本机 HTTPS 代理连接被拒绝。已用本地 mock 后端与 Vite 的 HTTP 冒烟检查验证应用链路；Docker 镜像在网络可用的机器上仍需实际构建确认。
+- **环境限制**：首次检查时代理不可用，离线缓存也缺少 `pydantic-core==2.50.1`；调整代理后已重新完成干净安装和 Docker 镜像构建、启动及 HTTP 验收。临时 Docker 栈已清理。
 - **面试表述边界**：33/33 只代表 33 条固定案例的应用流程断言通过；不代表医疗准确性、临床安全性或真实模型质量。没有录制成品视频，本日交付的是可照着录制的完整脚本。
 - **下一步**：进入优化阶段前，基于成熟开源 Agent 项目比较可复用模块，再选一个具体改进方向，通过学习、实现和评测形成下一阶段里程碑。
