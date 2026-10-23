@@ -4,7 +4,7 @@
 
 > **使用边界：**本项目只用于软件演示和开发学习，不面向真实患者，不提供医疗诊断、治疗、用药或分诊建议。请勿输入真实个人或健康信息。内置风险规则是有限的演示规则，不保证识别所有风险情况。
 
-项目已完成 Day 18。后端 API、Agent 状态图和 React 演示界面均可运行；评测集包含 33 条虚构案例。Day 18 的确定性 mock 评测连续三次均为 33/33 通过。该结果只代表固定案例上的软件流程断言通过，不代表临床正确性，也不代表真实模型输出质量。详细说明见[评测报告](docs/eval-report.md)。
+项目已完成 Day 20 的作品集交付整理。后端 API、Agent 状态图和 React 演示界面均可运行；评测集包含 33 条虚构案例。最终验收中后端 72 项测试通过，确定性 mock 评测 33/33 通过。该结果只代表固定案例上的软件流程断言通过，不代表临床正确性，也不代表真实模型输出质量。评测口径见[评测报告](docs/eval-report.md)，录屏与讲解流程见[演示脚本](docs/demo-script.md)。
 
 ## 项目能做什么
 
@@ -252,6 +252,7 @@ USE_MODEL=1 uv run python -m eval.baseline --cases eval/cases.jsonl --output eva
 │   ├── progress.md      # 每日开发进度
 │   ├── eval-plan.md     # 评测计划
 │   ├── eval-report.md   # 评测结果报告
+│   ├── demo-script.md   # 录屏讲解与面试介绍脚本
 │   └── day3-retrospective.md # Day 3 复盘
 ├── learning/            # Day 1–3 的独立学习练习，不是应用入口
 ├── .env.example         # 本地环境变量模板
@@ -265,13 +266,16 @@ USE_MODEL=1 uv run python -m eval.baseline --cases eval/cases.jsonl --output eva
 ## 文档索引
 
 - [产品规格](docs/spec.md)：目标、输入输出、动作边界与验收标准。
-- [开发进度](docs/progress.md)：Day 1–18 的实现记录和阶段结果。
+- [开发进度](docs/progress.md)：Day 1–20 的实现记录和阶段结果。
 - [评测计划](docs/eval-plan.md)：案例集设计与指标口径。
 - [评测使用说明](eval/README.md)：案例字段、Agent runner 和单轮基线命令。
 - [评测报告](docs/eval-report.md)：Day 17 失败基线与 Day 18 修复复测。
+- [演示与面试脚本](docs/demo-script.md)：约 4 分钟录屏流程、30 秒／2 分钟项目介绍及常见问题。
 - [20 天开发计划](docs/planning/20-day-plan.md)：项目学习和实现路线。
-- [项目交接说明](docs/planning/project-handoff.md)：项目背景与交接提示。
+- [项目交接说明](docs/planning/project-handoff.md)：项目背景、学习路线，以及参考资料和对照仓库的来源记录。
 - [Day 15 前端预览图](docs/assets/day15-preview.png)：早期界面截图。
+
+学习和技术路线主要参考 [AgentGuide](https://github.com/adongwanai/AgentGuide)；[SmartMedicalConsultation](https://github.com/Zz3212281607/SmartMedicalConsultation) 仅用于可选的架构对照。本项目独立实现，没有把对照仓库作为运行依赖；静态审查和来源说明见[项目交接说明](docs/planning/project-handoff.md)。
 
 ## 当前限制
 
