@@ -4,6 +4,12 @@ from backend.app.agent.state import ConsultationState
 
 REQUIRED_FIELDS = ["主要症状", "持续时间", "部位", "程度", "伴随表现", "已知背景"]
 
+# 可选字段：用户提到就提取，不主动追问。
+# 单独列出来，是为了让 missing_fields 只由必需字段驱动，不占用追问额度。
+OPTIONAL_FIELDS = ["加重缓解因素", "时间模式", "测量值"]
+
+ALL_FIELDS = REQUIRED_FIELDS + OPTIONAL_FIELDS
+
 # 关键词映射：每个字段对应一组触发词
 FIELD_KEYWORDS = {
     "主要症状": ["头部不适", "头痛", "头晕", "恶心", "发热", "呼吸困难", "咳嗽", "腹痛"],
@@ -12,6 +18,9 @@ FIELD_KEYWORDS = {
     "程度": ["轻", "明显", "严重", "剧烈", "轻微"],
     "伴随表现": ["暂无", "恶心", "发热", "胃部不适", "咳嗽", "乏力"],
     "已知背景": ["高血压", "糖尿病", "过敏", "无病史", "既往"],
+    "加重缓解因素": ["更明显", "更疼", "加重", "缓解", "就胀", "就喘", "就反酸", "弯腰", "站起来", "爬"],
+    "时间模式": ["一阵一阵", "晚上", "夜里", "早上", "每天", "反复", "总醒", "次"],
+    "测量值": ["三十八度", "三十九度", "三十七度", "四十度", "℃", "毫米汞柱", "次/分"],
 }
 
 
@@ -30,7 +39,7 @@ def extract_facts(message: str) -> dict:
 
 
 def compute_missing(collected: dict) -> list:
-    """计算还缺失的字段：必要字段中不在 collected_facts 里的。"""
+    """计算还缺失的字段：只有必需字段参与，可选字段永远不会变成追问目标。"""
     return [f for f in REQUIRED_FIELDS if f not in collected]
 
 

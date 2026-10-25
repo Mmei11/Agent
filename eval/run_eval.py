@@ -189,8 +189,22 @@ def check_case(case: dict[str, Any], client: TestClient, db_path: Path) -> dict[
     nodes = [entry.get("node") for entry in trace]
     # 只从 tool 节点提取被调用的工具名。
     tool_calls = [entry.get("called") for entry in trace if entry.get("node") == "tool"]
-    # 提取 decision 节点事件，供后续决策轨迹检查扩展使用。
+    # 提取 decision 节点事件，用于统计模型调用与 token 用量。
     action_entries = [entry for entry in trace if entry.get("node") == "decision"]
+    # 每条 decision 事件里都记录了 model_usage；mock 模式不带 token。
+    usage_entries = [entry.get("model_usage") or {} for entry in action_entries]
+    # 真正成功的模型调用次数（不含回退到预设的那次）。
+    model_calls = sum(
+        1 for u in usage_entries if u.get("mode") == "model" and not u.get("fallback")
+    )
+    # 回退次数：模型失败后由预设接管。
+    fallback_calls = sum(1 for u in usage_entries if u.get("fallback"))
+    # 整个会话（多轮累计）的 token 用量。
+    input_tokens = sum(u.get("input_tokens") or 0 for u in usage_entries)
+    output_tokens = sum(u.get("output_tokens") or 0 for u in usage_entries)
+    # 只有配置了单价才有成本估算。
+    known_costs = [u["cost_estimate"] for u in usage_entries if u.get("cost_estimate") is not None]
+    cost_estimate = round(sum(known_costs), 6) if known_costs else None
     # 读取结构化最终结果；尚未结束的会话这里为空字典。
     result = values.get("final_result", {})
     # 初始化失败原因清单；检查不通过时向其中添加说明。
@@ -352,12 +366,18 @@ def check_case(case: dict[str, Any], client: TestClient, db_path: Path) -> dict[
         "injected_fault": injected,
         # 记录秒级耗时，保留三位小数。
         "latency_seconds": round(elapsed, 3),
+        # 本会话的模型调用次数、token 与成本，用于 M4 指标。
+        "model_calls": model_calls,
+        "fallback_calls": fallback_calls,
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+        "cost_estimate": cost_estimate,
         # 响应正文只保留前 300 个字符，避免报告过长。
         "response_excerpt": response_text[:300],
     }
 
 
-def run(cases_path: Path, output_dir: Path, limit: int | None = None) -> int:
+def run(cases_path: Path, output_dir: Path, limit: int | None = None, use_model: bool = False) -> int:
     # 读取 JSONL 文件：跳过空行，把每一行解码成一个案例字典。
     cases = [json.loads(line) for line in cases_path.read_text(encoding="utf-8").splitlines() if line.strip()]
     # 可选地只运行前 limit 条，方便快速抽查。
@@ -367,8 +387,8 @@ def run(cases_path: Path, output_dir: Path, limit: int | None = None) -> int:
     output_dir.mkdir(parents=True, exist_ok=True)
     # 保存调用前的 USE_MODEL 值，保证结束时可以还原用户环境。
     original_use_model = os.environ.get("USE_MODEL")
-    # 强制 mock 决策器，避免调用真实模型，保证结果可重复。
-    os.environ["USE_MODEL"] = "0"  # deterministic preset chooser; no API model calls
+    # 默认强制 mock 决策器；传 --use-model 时才调用真实模型。
+    os.environ["USE_MODEL"] = "1" if use_model else "0"
     # 创建 FastAPI 客户端；服务端异常会变成 500 响应而不是在此处直接抛出。
     client = TestClient(app, raise_server_exceptions=False)
     # 初始化评测结果列表。
@@ -414,13 +434,14 @@ def run(cases_path: Path, output_dir: Path, limit: int | None = None) -> int:
     # 准备 Markdown 报告的开头和逐条结果表格表头。
     lines = [
         # 报告标题。
-        "# Day 17 Agent 自动评测报告",
+        "# Agent 自动评测报告",
         # 空行用于 Markdown 分段。
         "",
         # 显示总案例数、通过数和失败数。
         f"- 案例：{len(results)}；通过：{passed}；失败：{len(results) - passed}",
-        # 说明通过何种入口、是否调用真实模型。
-        "- 模式：FastAPI TestClient → 真实应用 graph；决策器固定为 mock，不调用外部模型。",
+        # 说明通过何种入口、用的是模型还是预设决策器。
+        "- 模式：FastAPI TestClient → 真实应用 graph；决策器为"
+        + ("真实模型（USE_MODEL=1），会调用外部 API。" if use_model else "确定性 mock，不调用外部模型。"),
         # 说明故障注入和 SQLite 恢复验证的实现方式。
         "- 工具故障案例通过注册表注入空结果或超时；会话恢复案例在同一 SQLite 文件上重建 graph/saver。",
         # 说明报告不评价临床正确性。
@@ -454,6 +475,38 @@ def run(cases_path: Path, output_dir: Path, limit: int | None = None) -> int:
         category_passed = sum(r["status"] == "pass" for r in category_results)
         # 汇总总数、通过数和失败数。
         lines.append(f"| {category} | {total} | {category_passed} | {total - category_passed} |")
+    # 汇总模型用量（M4 指标）。
+    total_calls = sum(r["model_calls"] for r in results)
+    total_fallbacks = sum(r["fallback_calls"] for r in results)
+    total_input = sum(r["input_tokens"] for r in results)
+    total_output = sum(r["output_tokens"] for r in results)
+    known_costs_all = [r["cost_estimate"] for r in results if r["cost_estimate"] is not None]
+    total_cost = round(sum(known_costs_all), 6) if known_costs_all else None
+    latencies = sorted(r["latency_seconds"] for r in results)
+
+    def _pct(values: list[float], q: float) -> float:
+        if not values:
+            return 0.0
+        k = (len(values) - 1) * q
+        lo = int(k)
+        hi = min(lo + 1, len(values) - 1)
+        return round(values[lo] + (values[hi] - values[lo]) * (k - lo), 3)
+
+    lines += [
+        "",
+        "## 用量与延迟",
+        "",
+        "| 指标 | 值 |",
+        "|---|---:|",
+        f"| 决策器 | {'model' if use_model else 'mock'} |",
+        f"| 模型调用次数 | {total_calls} |",
+        f"| 回退预设次数 | {total_fallbacks} |",
+        f"| input tokens | {total_input} |",
+        f"| output tokens | {total_output} |",
+        f"| 成本估算 | {('¥' + str(total_cost)) if total_cost is not None else '未配置单价'} |",
+        f"| 延迟 p50 / p95 / max（秒） | {_pct(latencies, 0.5)} / {_pct(latencies, 0.95)} / {max(latencies) if latencies else 0} |",
+    ]
+
     # 报告末尾加入逐条 JSON 文件的路径和一个空行。
     lines += ["", f"逐条 JSON 结果：`{jsonl_path}`。", ""]
     # 生成 Markdown 报告的路径。
@@ -475,10 +528,15 @@ def main() -> int:
     parser.add_argument("--output-dir", type=Path, default=Path("eval/results"))
     # --limit 限定运行前多少条案例；不填就跑完整集合。
     parser.add_argument("--limit", type=int, help="仅运行前 N 条案例")
+    parser.add_argument(
+        "--use-model",
+        action="store_true",
+        help="用真实模型做决策（会调用外部 API 并产生费用）；不加则用确定性 mock",
+    )
     # 解析用户实际传入的命令行参数。
     args = parser.parse_args()
     # 将命令行参数传给 run，并返回它产生的退出码。
-    return run(args.cases, args.output_dir, args.limit)
+    return run(args.cases, args.output_dir, args.limit, args.use_model)
 
 
 # 只有直接运行 python -m eval.run_eval 时才进入命令行主流程。

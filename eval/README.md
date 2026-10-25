@@ -51,3 +51,26 @@ The runner writes `eval/results/agent-eval-results.jsonl` and
 `eval/results/agent-eval-report.md`. It inspects the persisted graph trace to
 check routing and tool use. Failures are recorded per case; the command exits
 nonzero if any case fails.
+
+## Model-mode run (M4 baseline)
+
+By default the runner forces the deterministic mock chooser. Pass `--use-model`
+to let the real model decide; this calls the external API and costs money.
+
+```sh
+uv run python -m eval.run_eval --use-model --output-dir eval/results/phase0-model-baseline
+```
+
+Each row in the JSONL now carries `model_calls`, `fallback_calls`,
+`input_tokens`, `output_tokens`, and `cost_estimate`; the report adds a usage
+and latency section. `cost_estimate` stays `null` unless you provide prices:
+
+```dotenv
+MODEL_PRICE_INPUT_PER_1K=你的单价
+MODEL_PRICE_OUTPUT_PER_1K=你的单价
+```
+
+Model mode is not deterministic, so a passing run is not evidence that the same
+cases will pass next time. Record the model name and run date with the results.
+Risk, vague, and invalid cases short-circuit before the decision node, so they
+consume no tokens.

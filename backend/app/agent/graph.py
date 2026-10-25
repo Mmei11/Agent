@@ -56,14 +56,19 @@ def decision(state: ConsultationState) -> dict:
     模型选的动作记入 trace；校验后实际执行的动作也记入。
     """
     # 根据环境变量决定用模型还是预设：USE_MODEL=1 用模型，否则用预设
-    chooser = model_choose if os.getenv("USE_MODEL") == "1" else mock_choose
+    use_model = os.getenv("USE_MODEL") == "1"
 
     model_choice = None  # 模型选的动作，先置空
+    model_usage = {"mode": "mock"}  # 用量记录，预设模式不产生费用
     try:
-        raw = chooser(state)  # 调模型或预设，拿到 JSON 文本
+        if use_model:
+            raw, model_usage = model_choose(state)  # 返回原始文本和 token 用量
+        else:
+            raw = mock_choose(state)
         model_choice = parse_action(raw)  # 解析 JSON，提取动作名并校验合法性
     except DecisionError as exc:
         # 模型不可用或返回无效时，用预设兜底——保证流程不中断
+        model_usage = {"mode": "model", "fallback": True, "error": str(exc)}
         raw = mock_choose(state)
         model_choice = parse_action(raw)
 
@@ -78,6 +83,7 @@ def decision(state: ConsultationState) -> dict:
                 "model_choice": model_choice,  # 模型选了什么
                 "final_action": final_action,  # 程序最终执行什么
                 "same": model_choice == final_action,  # 两者是否一致（False 说明被兜底了）
+                "model_usage": model_usage,  # token 用量与成本估算，供 M4 指标统计
             }
         ],
     }

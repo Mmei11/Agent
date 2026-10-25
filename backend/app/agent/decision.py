@@ -53,7 +53,13 @@ def load_env_file() -> None:
     if not env_path.exists():
         return  # 没有 .env 文件就算了
 
-    allowed_names = {"DASHSCOPE_API_KEY", "DASHSCOPE_BASE_URL", "DASHSCOPE_MODEL"}  # 只认这三个变量
+    allowed_names = {
+        "DASHSCOPE_API_KEY",
+        "DASHSCOPE_BASE_URL",
+        "DASHSCOPE_MODEL",
+        "MODEL_PRICE_INPUT_PER_1K",
+        "MODEL_PRICE_OUTPUT_PER_1K",
+    }  # 只认这几个变量，其余写在 .env 里也不会被读入
     for line in env_path.read_text(encoding="utf-8").splitlines():  # 逐行读
         line = line.strip()  # 去掉首尾空白
         if not line or line.startswith("#"):  # 空行和注释跳过
@@ -68,8 +74,24 @@ def load_env_file() -> None:
         os.environ.setdefault(name, value)  # 终端已有同名变量时不覆盖（终端优先）
 
 
-def model_choose(state: ConsultationState) -> str:
-    """向模型请求动作选择，返回原始 JSON 文本。"""
+def estimate_cost(usage: dict) -> float | None:
+    """按环境变量里的单价估算本次调用成本；没配单价时返回 None，不瞎猜价格。"""
+    price_in = os.getenv("MODEL_PRICE_INPUT_PER_1K")
+    price_out = os.getenv("MODEL_PRICE_OUTPUT_PER_1K")
+    if not price_in or not price_out:
+        return None
+    try:
+        return round(
+            (usage.get("prompt_tokens") or 0) / 1000 * float(price_in)
+            + (usage.get("completion_tokens") or 0) / 1000 * float(price_out),
+            6,
+        )
+    except (TypeError, ValueError):
+        return None
+
+
+def model_choose(state: ConsultationState) -> tuple[str, dict]:
+    """向模型请求动作选择，返回（原始 JSON 文本, 用量记录）。"""
     load_env_file()  # 先加载 .env 里的 Key
     api_key = os.getenv("DASHSCOPE_API_KEY")  # 从环境变量取 Key
     if not api_key:
@@ -112,7 +134,14 @@ def model_choose(state: ConsultationState) -> str:
         with urlopen(request, timeout=20) as response:  # 发请求，20 秒超时
             data = json.load(response)  # 解析百炼返回的 JSON
         content = data["choices"][0]["message"]["content"]  # 取模型输出的文本
-        return content  # 返回模型给的原始 JSON 文本
+        usage = data.get("usage") or {}  # 百炼在 usage 里返回 token 用量
+        return content, {
+            "mode": "model",
+            "model": payload["model"],
+            "input_tokens": usage.get("prompt_tokens"),
+            "output_tokens": usage.get("completion_tokens"),
+            "cost_estimate": estimate_cost(usage),
+        }
     except (HTTPError, URLError, TimeoutError) as exc:  # 网络出问题
         raise DecisionError(f"模型请求失败：{exc}") from exc  # 包装成可显示的错误
     except (KeyError, IndexError, TypeError, json.JSONDecodeError) as exc:  # 响应格式不对
