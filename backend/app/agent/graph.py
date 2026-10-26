@@ -1,16 +1,12 @@
 """Day 5-10：问诊 Agent 状态图。决策器支持模型和预设两种模式。案例均为虚构。"""
 
-import os  # 读取 USE_MODEL 环境变量，控制用模型还是预设
-
 from langgraph.graph import END, START, StateGraph  # LangGraph 图的组件
 
 # 从 decision.py 导入决策相关函数
 from backend.app.agent.decision import (
-    DecisionError,  # 决策错误，用于捕获后回退预设
-    mock_choose,  # 预设决策器，无 Key 时用
-    model_choose,  # 模型决策器，有 Key 时用
-    parse_action,  # 解析模型返回的 JSON，提取动作名
-    validate_action,  # 校验模型选的动作能否执行，不能就兜底
+    choose_auto,  # 模型决策，未启用或失败时回退规则
+    gate_by_confidence,  # 置信度不足时收回决定权
+    validate_action,  # 校验动作能否执行，不能就兜底
 )
 from backend.app.agent.followup import followup, select_next_field  # 追问节点和字段选择
 from backend.app.agent.intake import intake  # 入口节点，提取字段
@@ -50,40 +46,28 @@ def route_after_risk(state: ConsultationState) -> str:
 
 
 def decision(state: ConsultationState) -> dict:
-    """决策节点：模型（或预设）选动作，程序校验后执行。
+    """决策节点：模型（或规则）选动作，置信度闸门，再由程序校验权限。
 
-    用 USE_MODEL 控制调模型还是预设。Key 不可用时自动回退预设。
-    模型选的动作记入 trace；校验后实际执行的动作也记入。
+    trace 记录模型选了什么、依据和置信度、最终执行什么、是否被降级。
     """
-    # 根据环境变量决定用模型还是预设：USE_MODEL=1 用模型，否则用预设
-    use_model = os.getenv("USE_MODEL") == "1"
-
-    model_choice = None  # 模型选的动作，先置空
-    model_usage = {"mode": "mock"}  # 用量记录，预设模式不产生费用
-    try:
-        if use_model:
-            raw, model_usage = model_choose(state)  # 返回原始文本和 token 用量
-        else:
-            raw = mock_choose(state)
-        model_choice = parse_action(raw)  # 解析 JSON，提取动作名并校验合法性
-    except DecisionError as exc:
-        # 模型不可用或返回无效时，用预设兜底——保证流程不中断
-        model_usage = {"mode": "model", "fallback": True, "error": str(exc)}
-        raw = mock_choose(state)
-        model_choice = parse_action(raw)
-
-    # 程序校验：模型选的动作能不能执行，不能就兜底
-    final_action = validate_action(model_choice, state, MAX_FOLLOWUPS)
+    result = choose_auto(state, MAX_FOLLOWUPS)
+    trusted_choice, downgraded = gate_by_confidence(
+        result.action, result.confidence, state, MAX_FOLLOWUPS
+    )
+    final_action = validate_action(trusted_choice, state, MAX_FOLLOWUPS)
 
     return {
         "next_action": final_action,  # 最终执行的动作，决定走哪条边
         "trace": [
             {
                 "node": "decision",
-                "model_choice": model_choice,  # 模型选了什么
-                "final_action": final_action,  # 程序最终执行什么
-                "same": model_choice == final_action,  # 两者是否一致（False 说明被兜底了）
-                "model_usage": model_usage,  # token 用量与成本估算，供 M4 指标统计
+                "model_choice": result.action,  # 模型或规则原本选了什么
+                "reason": result.reason,  # 模型给的依据
+                "confidence": result.confidence,  # 规则决策为 None
+                "final_action": final_action,  # 闸门和校验后的动作
+                "downgraded_by_confidence": downgraded,  # 是否因低置信度被收回
+                "same": result.action == final_action,  # False 说明被改过
+                "model_usage": result.usage,  # token 用量与成本估算，供 M4 统计
             }
         ],
     }

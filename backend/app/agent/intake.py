@@ -45,8 +45,8 @@ def compute_missing(collected: dict) -> list:
     return [f for f in REQUIRED_FIELDS if f not in collected]
 
 
-def extract_facts_auto(message: str, meta: dict | None = None) -> dict:
-    """USE_MODEL=1 时走模型抽取，失败或未启用时回退关键词抽取。
+def extract_facts_auto(message: str, meta: dict | None = None) -> tuple[dict, dict]:
+    """USE_MODEL=1 时走模型抽取，返回（字段值, 证据）；失败或未启用时回退关键词。
 
     meta 收集本次用了哪个抽取器和用量，由调用方写进 trace。
     """
@@ -54,7 +54,7 @@ def extract_facts_auto(message: str, meta: dict | None = None) -> dict:
         try:
             from backend.app.agent.intake_llm import extract_facts_with_meta
 
-            facts, usage = extract_facts_with_meta(message)
+            facts, evidence, usage = extract_facts_with_meta(message)
             if meta is not None:
                 meta.update(
                     {
@@ -68,7 +68,7 @@ def extract_facts_auto(message: str, meta: dict | None = None) -> dict:
                         },
                     }
                 )
-            return facts
+            return facts, evidence
         except Exception as exc:
             # 模型层出任何问题都不能打断问诊，回退关键词并把原因留在 trace。
             if meta is not None:
@@ -81,7 +81,7 @@ def extract_facts_auto(message: str, meta: dict | None = None) -> dict:
                 )
     elif meta is not None:
         meta["extractor"] = "keyword"
-    return extract_facts(message)
+    return extract_facts(message), {}
 
 
 def intake(state: ConsultationState) -> dict:
@@ -92,7 +92,7 @@ def intake(state: ConsultationState) -> dict:
     """
     message = state.latest_user_message
     meta = {}
-    new_facts = extract_facts_auto(message, meta)
+    new_facts, new_evidence = extract_facts_auto(message, meta)
 
     collected = {k: list(v) for k, v in state.collected_facts.items()}
     for field, values in new_facts.items():
@@ -103,12 +103,20 @@ def intake(state: ConsultationState) -> dict:
         else:
             collected[field] = list(values)
 
+    evidence = {k: list(v) for k, v in state.fact_evidence.items()}
+    for field, fragments in new_evidence.items():
+        existing = evidence.setdefault(field, [])
+        for fragment in fragments:
+            if fragment not in existing:
+                existing.append(fragment)
+
     missing = compute_missing(collected)
 
     return {
         "turn_id": state.turn_id + 1,
         "conversation": [{"role": "user", "text": message}],
         "collected_facts": collected,
+        "fact_evidence": evidence,
         "missing_fields": missing,
         "final_result": {},
         "rendered_text": "",

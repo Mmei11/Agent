@@ -70,6 +70,20 @@ def keep_supported(facts: IntakeFacts, text: str) -> IntakeFacts:
     return IntakeFacts(**cleaned)
 
 
+def to_evidence_dict(facts: IntakeFacts) -> dict:
+    """证据按中文字段名归档，空证据不写入。"""
+    result = {}
+    for field, chinese_name in FIELD_MAP.items():
+        evidences = []
+        for fact in getattr(facts, field):
+            evidence = fact.evidence.strip()
+            if evidence and evidence not in evidences:
+                evidences.append(evidence)
+        if evidences:
+            result[chinese_name] = evidences
+    return result
+
+
 def to_field_dict(facts: IntakeFacts) -> dict:
     """转成评测脚本和 state 使用的中文键名，空字段不写入。"""
     result = {}
@@ -84,8 +98,8 @@ def to_field_dict(facts: IntakeFacts) -> dict:
     return result
 
 
-def extract_facts_with_meta(text: str) -> tuple[dict, LLMResult]:
-    """抽取并返回用量，供 trace 记录。"""
+def extract_facts_with_meta(text: str) -> tuple[dict, dict, LLMResult]:
+    """抽取并返回值、证据和用量。值和证据必须来自同一个 cleaned。"""
     facts, usage = chat_structured(
         [
             {"role": "system", "content": SYSTEM_PROMPT},
@@ -94,7 +108,8 @@ def extract_facts_with_meta(text: str) -> tuple[dict, LLMResult]:
         IntakeFacts,
         max_tokens=800,
     )
-    return to_field_dict(keep_supported(facts, text)), usage
+    cleaned = keep_supported(facts, text)
+    return to_field_dict(cleaned), to_evidence_dict(cleaned), usage
 
 
 def extract_facts(text: str) -> dict:

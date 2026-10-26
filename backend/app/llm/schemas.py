@@ -4,6 +4,8 @@
 在边界处转换，评测脚本和 state 不用改。
 """
 
+from typing import Literal
+
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -46,3 +48,17 @@ FIELD_MAP = {
     "pattern": "时间模式",
     "measurement": "测量值",
 }
+
+
+class DecisionChoice(BaseModel):
+    """一次动作决策：做什么、为什么、有多大把握。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    action: Literal["ASK_FOLLOWUP", "CALL_TOOL", "FINALIZE"] = Field(
+        description="下一步动作，只能是三个之一"
+    )
+    reason: str = Field(
+        min_length=1, max_length=200, description="选择这个动作的依据，引用字段或原话片段"
+    )
+    confidence: float = Field(ge=0, le=1, description="自评置信度，依据不足时如实给低分")

@@ -1,32 +1,13 @@
-"""Day 10：模型决策器与动作校验。模型提出动作，程序校验是否允许。案例均为虚构。"""
+"""第三课：模型决策、置信度闸门与动作校验。案例均为虚构。"""
 
-import json  # 解析模型返回的 JSON 文本
-import os  # 读取环境变量里的 API Key
-from urllib.error import HTTPError, URLError  # 捕获网络请求错误
-from urllib.request import Request, urlopen  # 发送 HTTP 请求到百炼
+import os
+from dataclasses import dataclass, field
 
-from backend.app.agent.followup import select_next_field  # 判断还有没有值得问的字段
-from backend.app.agent.state import ConsultationState  # 状态类型
-from backend.app.llm.client import load_env_file  # 环境变量加载已搬到 llm 层
+from backend.app.agent.followup import select_next_field
+from backend.app.agent.state import ConsultationState
 
-DEFAULT_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"  # 百炼默认地址
-
-SYSTEM_PROMPT = """你是模拟问诊 Agent 的动作选择器。请只输出一个 JSON 对象，不要 Markdown 或解释。
-可选动作：
-1. {"action":"ASK_FOLLOWUP"}    # 需要追问缺失信息
-2. {"action":"CALL_TOOL"}        # 需要调用科室建议工具
-3. {"action":"FINALIZE"}         # 信息足够或无法继续，结束
-
-选择依据：
-- 如果缺失字段还有未问过的（missing_fields 非空且有可问的）→ ASK_FOLLOWUP
-- 如果工具还没调用过 → CALL_TOOL
-- 如果工具已调用 → FINALIZE
-每次只能选一个动作。"""
-
-
-class DecisionError(RuntimeError):
-    """决策器产生的可安全显示的错误。"""
-
+# 低于这个分数，模型的动作不执行，改由规则决策。
+MIN_CONFIDENCE = 0.6
 
 FOLLOWUP_DECLINE_PHRASES = (
     "拒绝补充",
@@ -45,96 +26,74 @@ def user_declined_followup(message: str) -> bool:
     return any(phrase in message for phrase in FOLLOWUP_DECLINE_PHRASES)
 
 
-def estimate_cost(usage: dict) -> float | None:
-    """按环境变量里的单价估算本次调用成本；没配单价时返回 None，不瞎猜价格。"""
-    price_in = os.getenv("MODEL_PRICE_INPUT_PER_1K")
-    price_out = os.getenv("MODEL_PRICE_OUTPUT_PER_1K")
-    if not price_in or not price_out:
-        return None
+@dataclass(frozen=True)
+class Decision:
+    """一次决策的归一化结果：模型和规则共用同一种返回形状。"""
+
+    action: str
+    reason: str = ""
+    confidence: float | None = None
+    usage: dict = field(default_factory=dict)
+
+
+def rule_action(state: ConsultationState, max_followups: int) -> str:
+    """确定性规则：没问够就问，没调工具就调，否则结束。"""
+    under_limit = state.followup_count < max_followups
+    can_ask = select_next_field(state.missing_fields, state.asked_questions) is not None
+    tool_called = "department_suggest" in state.tool_results
+
+    if under_limit and can_ask:
+        return "ASK_FOLLOWUP"
+    if not tool_called:
+        return "CALL_TOOL"
+    return "FINALIZE"
+
+
+def choose_auto(state: ConsultationState, max_followups: int) -> Decision:
+    """USE_MODEL=1 时问模型，未启用或模型失败时回退规则。"""
+    if os.getenv("USE_MODEL") != "1":
+        return Decision(action=rule_action(state, max_followups), usage={"mode": "mock"})
+
+    from backend.app.agent.decision_llm import choose_with_meta
+    from backend.app.llm.client import LLMError
+
     try:
-        return round(
-            (usage.get("prompt_tokens") or 0) / 1000 * float(price_in)
-            + (usage.get("completion_tokens") or 0) / 1000 * float(price_out),
-            6,
+        choice, usage = choose_with_meta(state, max_followups)
+    except LLMError as exc:
+        # 模型挂了也要把问诊走完；原因留在 trace，供事后定位。
+        return Decision(
+            action=rule_action(state, max_followups),
+            usage={"mode": "model", "fallback": True, "error": str(exc)},
         )
-    except (TypeError, ValueError):
-        return None
 
-
-def model_choose(state: ConsultationState) -> tuple[str, dict]:
-    """向模型请求动作选择，返回（原始 JSON 文本, 用量记录）。"""
-    load_env_file()  # 先加载 .env 里的 Key
-    api_key = os.getenv("DASHSCOPE_API_KEY")  # 从环境变量取 Key
-    if not api_key:
-        raise DecisionError("缺少 DASHSCOPE_API_KEY")  # 没 Key 就报错，让上层回退预设
-
-    base_url = os.getenv("DASHSCOPE_BASE_URL", DEFAULT_BASE_URL).rstrip("/")  # 百炼地址
-    payload = {  # 发给百炼的请求体
-        "model": os.getenv("DASHSCOPE_MODEL", "qwen-plus"),  # 模型名
-        "messages": [
-            # 第一条：系统提示，告诉模型只能输出三种 JSON 之一
-            {"role": "system", "content": SYSTEM_PROMPT},
-            # 第二条：把当前状态打包成 JSON 发给模型
-            {
-                "role": "user",
-                "content": json.dumps(
-                    {
-                        "missing_fields": state.missing_fields,  # 缺什么字段
-                        "asked_questions": state.asked_questions,  # 问过什么
-                        "tool_results_keys": list(state.tool_results.keys()),  # 工具调没调
-                        "followup_count": state.followup_count,  # 追问了几次
-                    },
-                    ensure_ascii=False,  # 中文不转义
-                ),
-            },
-        ],
-        "response_format": {"type": "json_object"},  # 强制模型返回 JSON
-        "enable_thinking": False,  # 关闭思考过程
-        "max_tokens": 128,  # 限制输出长度，动作 JSON 很短
-    }
-    request = Request(  # 构造 HTTP 请求
-        f"{base_url}/chat/completions",  # 百炼的聊天接口
-        data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),  # 请求体转 JSON 字节
-        headers={
-            "Authorization": f"Bearer {api_key}",  # 鉴权
-            "Content-Type": "application/json",
-        },
-        method="POST",
-    )
-    try:
-        with urlopen(request, timeout=20) as response:  # 发请求，20 秒超时
-            data = json.load(response)  # 解析百炼返回的 JSON
-        content = data["choices"][0]["message"]["content"]  # 取模型输出的文本
-        usage = data.get("usage") or {}  # 百炼在 usage 里返回 token 用量
-        return content, {
+    return Decision(
+        action=choice.action,
+        reason=choice.reason,
+        confidence=choice.confidence,
+        usage={
             "mode": "model",
-            "model": payload["model"],
-            "input_tokens": usage.get("prompt_tokens"),
-            "output_tokens": usage.get("completion_tokens"),
-            "cost_estimate": estimate_cost(usage),
-        }
-    except (HTTPError, URLError, TimeoutError) as exc:  # 网络出问题
-        raise DecisionError(f"模型请求失败：{exc}") from exc  # 包装成可显示的错误
-    except (KeyError, IndexError, TypeError, json.JSONDecodeError) as exc:  # 响应格式不对
-        raise DecisionError(f"模型响应解析失败：{exc}") from exc
+            "model": usage.model,
+            "input_tokens": usage.input_tokens,
+            "output_tokens": usage.output_tokens,
+            "latency_ms": usage.latency_ms,
+            "cost_estimate": usage.cost_estimate,
+        },
+    )
 
 
-def parse_action(raw: str) -> str:
-    """解析模型返回的 JSON，提取动作名。无效时抛 DecisionError。"""
-    try:
-        action = json.loads(raw)  # 把 JSON 文本解析成字典
-    except json.JSONDecodeError as exc:
-        raise DecisionError("模型输出不是合法 JSON") from exc  # 不是 JSON 就报错
-    name = action.get("action")  # 取 action 字段
-    if name not in ("ASK_FOLLOWUP", "CALL_TOOL", "FINALIZE"):  # 检查是不是三个合法动作之一
-        raise DecisionError(f"未知动作：{name}")  # 模型回了个不认识的动作就拒掉
-    return name  # 返回动作名
+def gate_by_confidence(
+    choice: str, confidence: float | None, state: ConsultationState, max_followups: int
+) -> tuple[str, bool]:
+    """置信度不足时收回决定权，返回（实际采用的动作, 是否降级）。"""
+    if confidence is None or confidence >= MIN_CONFIDENCE:
+        return choice, False
+    return rule_action(state, max_followups), True
 
 
 def validate_action(model_choice: str, state: ConsultationState, max_followups: int) -> str:
-    """校验模型选的动作是否允许执行。不允许时返回兜底动作。
+    """校验动作是否允许执行。不允许时返回兜底动作。
 
-    返回最终执行的动作（可能与模型选择不同）。
+    返回最终执行的动作（可能与传入动作不同）。
     """
     under_limit = state.followup_count < max_followups  # 追问还没到上限
     can_ask = select_next_field(state.missing_fields, state.asked_questions) is not None  # 还有值得问的字段
@@ -157,18 +116,7 @@ def validate_action(model_choice: str, state: ConsultationState, max_followups: 
         # 工具已调用 → 不重复调
         return "FINALIZE"  # 兜底为结束
 
-    # FINALIZE 始终允许，不需要校验
-    return "FINALIZE"
-
-
-def mock_choose(state: ConsultationState) -> str:
-    """预设决策器：用规则代替模型，返回 JSON 文本。无 Key 时用这个。"""
-    under_limit = state.followup_count < 3  # 追问没到 3 次上限
-    can_ask = select_next_field(state.missing_fields, state.asked_questions) is not None  # 还有可问的
-    tool_called = "department_suggest" in state.tool_results  # 工具调过了
-
-    if under_limit and can_ask:
-        return '{"action":"ASK_FOLLOWUP"}'  # 有缺失没问够 → 追问
+    # 完成结果必须包含工具整理过的内容，没调工具就不许结束。
     if not tool_called:
-        return '{"action":"CALL_TOOL"}'  # 工具没调 → 调工具
-    return '{"action":"FINALIZE"}'  # 都做完了 → 结束
+        return "CALL_TOOL"
+    return "FINALIZE"

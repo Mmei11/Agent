@@ -27,6 +27,10 @@ class ConsultationState(BaseModel):
     # 你来决定用 dict 还是 list，以及是否需要追加合并
     collected_facts: dict = {}
 
+    # fact_evidence：{"主要症状": ["一阵一阵胀痛"], ...}
+    # 每个值的原文出处，和 collected_facts 同步跨轮合并；关键词模式为空。
+    fact_evidence: dict = {}
+
     # missing_fields：还没收集到的字段名，每轮重新计算（覆盖）
     missing_fields: list = []
 

@@ -189,6 +189,8 @@ def check_case(case: dict[str, Any], client: TestClient, db_path: Path) -> dict[
     trace = values.get("trace", [])
     # 提取每个轨迹事件中的节点名，保留其执行顺序。
     nodes = [entry.get("node") for entry in trace]
+    # 决策轮的明细：模型选了什么、最终执行什么、置信度多少。
+    decisions = [entry for entry in trace if entry.get("node") == "decision"]
     # 只从 tool 节点提取被调用的工具名。
     tool_calls = [entry.get("called") for entry in trace if entry.get("node") == "tool"]
     # decision 节点的用量记录在 model_usage；intake 节点的模型抽取记录在 usage。
@@ -390,6 +392,15 @@ def check_case(case: dict[str, Any], client: TestClient, db_path: Path) -> dict[
         "input_tokens": input_tokens,
         "output_tokens": output_tokens,
         "cost_estimate": cost_estimate,
+        # 决策质量观测：轮次、与模型的最终一致数、低置信度降级数、置信度分布。
+        "decision_rounds": len(decisions),
+        "decision_same": sum(1 for d in decisions if d.get("same")),
+        "decision_downgraded": sum(
+            1 for d in decisions if d.get("downgraded_by_confidence")
+        ),
+        "decision_confidences": [
+            d["confidence"] for d in decisions if d.get("confidence") is not None
+        ],
         # 响应正文只保留前 300 个字符，避免报告过长。
         "response_excerpt": response_text[:300],
     }
@@ -501,6 +512,14 @@ def run(cases_path: Path, output_dir: Path, limit: int | None = None, use_model:
     known_costs_all = [r["cost_estimate"] for r in results if r["cost_estimate"] is not None]
     total_cost = round(sum(known_costs_all), 6) if known_costs_all else None
     latencies = sorted(r["latency_seconds"] for r in results)
+    # 决策质量汇总：一致率看模型动作有没有被程序改掉，降级数看置信度闸门触发几次。
+    total_decisions = sum(r["decision_rounds"] for r in results)
+    same_decisions = sum(r["decision_same"] for r in results)
+    downgraded_decisions = sum(r["decision_downgraded"] for r in results)
+    all_confidences = [c for r in results for c in r["decision_confidences"]]
+    avg_confidence = (
+        round(sum(all_confidences) / len(all_confidences), 3) if all_confidences else None
+    )
 
     def _pct(values: list[float], q: float) -> float:
         if not values:
@@ -523,6 +542,9 @@ def run(cases_path: Path, output_dir: Path, limit: int | None = None, use_model:
         f"| output tokens | {total_output} |",
         f"| 成本估算 | {('¥' + str(total_cost)) if total_cost is not None else '未配置单价'} |",
         f"| 延迟 p50 / p95 / max（秒） | {_pct(latencies, 0.5)} / {_pct(latencies, 0.95)} / {max(latencies) if latencies else 0} |",
+        f"| 决策轮次 / 最终动作与模型一致 | {total_decisions} / {same_decisions} |",
+        f"| 低置信度降级次数 | {downgraded_decisions} |",
+        f"| 平均置信度 | {avg_confidence if avg_confidence is not None else '—'} |",
     ]
 
     # 报告末尾加入逐条 JSON 文件的路径和一个空行。

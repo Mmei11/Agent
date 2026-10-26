@@ -1,44 +1,64 @@
-"""Day 10 决策器测试：模型选的动作被校验，不合法时兜底。案例均为虚构。"""
+"""第三课：规则决策、置信度闸门与动作校验。不联网、不花钱。"""
 
-from backend.app.agent.decision import mock_choose, parse_action, validate_action
+import pytest
+
+from backend.app.agent.decision import (
+    choose_auto,
+    gate_by_confidence,
+    rule_action,
+    validate_action,
+)
 from backend.app.agent.state import ConsultationState
+from backend.app.llm.client import LLMError, LLMResult
+from backend.app.llm.schemas import DecisionChoice
 
 
-def test_mock_asks_when_missing_and_under_limit():
-    """有缺失字段、没到上限 → 预设选 ASK_FOLLOWUP。"""
+@pytest.fixture(autouse=True)
+def _force_mock(monkeypatch):
+    """默认跑规则路径，避免本机 USE_MODEL=1 影响单测。"""
+    monkeypatch.delenv("USE_MODEL", raising=False)
+
+
+def _usage() -> LLMResult:
+    return LLMResult(
+        content="",
+        model="qwen-plus",
+        input_tokens=120,
+        output_tokens=30,
+        latency_ms=800,
+        cost_estimate=0.0002,
+    )
+
+
+def test_rule_asks_when_missing_and_under_limit():
+    """有缺失字段、没到上限 → 规则选 ASK_FOLLOWUP。"""
     state = ConsultationState(
         missing_fields=["持续时间", "程度"],
         asked_questions=[],
         followup_count=0,
     )
-    raw = mock_choose(state)
-    action = parse_action(raw)
-    assert action == "ASK_FOLLOWUP"
+    assert rule_action(state, max_followups=3) == "ASK_FOLLOWUP"
 
 
-def test_mock_calls_tool_when_no_more_questions():
-    """没有可问的了 → 预设选 CALL_TOOL。"""
+def test_rule_calls_tool_when_no_more_questions():
+    """没有可问的了 → 规则选 CALL_TOOL。"""
     state = ConsultationState(
         missing_fields=["已知背景"],
         asked_questions=["请问有没有既往病史或正在用药？"],
         followup_count=1,
     )
-    raw = mock_choose(state)
-    action = parse_action(raw)
-    assert action == "CALL_TOOL"
+    assert rule_action(state, max_followups=3) == "CALL_TOOL"
 
 
-def test_mock_finalizes_when_tool_done():
-    """工具已调用 → 预设选 FINALIZE。"""
+def test_rule_finalizes_when_tool_done():
+    """工具已调用 → 规则选 FINALIZE。"""
     state = ConsultationState(
         missing_fields=["已知背景"],
         asked_questions=["请问有没有既往病史或正在用药？"],
         followup_count=1,
         tool_results={"department_suggest": {"department": "神经内科"}},
     )
-    raw = mock_choose(state)
-    action = parse_action(raw)
-    assert action == "FINALIZE"
+    assert rule_action(state, max_followups=3) == "FINALIZE"
 
 
 def test_validate_overrides_model_ask_when_none_available():
@@ -86,23 +106,120 @@ def test_validate_stops_followup_after_explicit_refusal():
     assert final == "CALL_TOOL"
 
 
-def test_parse_action_rejects_unknown():
-    """模型返回未知动作 → 抛异常。"""
-    from backend.app.agent.decision import DecisionError
+def test_validate_forces_tool_before_finalize():
+    """模型想结束但工具没调过 → 先补齐科室建议，不让完成结果缺一块。"""
+    state = ConsultationState(
+        latest_user_message="拒绝补充更多信息",
+        missing_fields=["持续时间"],
+        followup_count=1,
+    )
+    final = validate_action("FINALIZE", state, max_followups=3)
+    assert final == "CALL_TOOL"
 
-    try:
-        parse_action('{"action":"FLY"}')
-        assert False, "应该抛异常"
-    except DecisionError:
-        pass
+
+def test_validate_allows_finalize_after_tool():
+    """工具调过之后，FINALIZE 放行。"""
+    state = ConsultationState(
+        missing_fields=["持续时间"],
+        followup_count=1,
+        tool_results={"department_suggest": {"department": "神经内科"}},
+    )
+    final = validate_action("FINALIZE", state, max_followups=3)
+    assert final == "FINALIZE"
 
 
-def test_parse_action_rejects_bad_json():
-    """模型返回非 JSON → 抛异常。"""
-    from backend.app.agent.decision import DecisionError
+def test_gate_trusts_high_confidence():
+    """置信度过关 → 保留模型动作。"""
+    state = ConsultationState(missing_fields=["持续时间"], followup_count=0)
+    action, downgraded = gate_by_confidence("ASK_FOLLOWUP", 0.9, state, 3)
 
-    try:
-        parse_action("not json")
-        assert False, "应该抛异常"
-    except DecisionError:
-        pass
+    assert action == "ASK_FOLLOWUP"
+    assert downgraded is False
+
+
+def test_gate_threshold_is_inclusive():
+    """刚好 0.6 视为可信，避免阈值本身成为模糊地带。"""
+    state = ConsultationState(missing_fields=["持续时间"], followup_count=0)
+    action, downgraded = gate_by_confidence("ASK_FOLLOWUP", 0.6, state, 3)
+
+    assert action == "ASK_FOLLOWUP"
+    assert downgraded is False
+
+
+def test_gate_downgrades_low_confidence_to_rule():
+    """置信度不足 → 收回决定权，改用规则动作。"""
+    state = ConsultationState(
+        missing_fields=["已知背景"],
+        asked_questions=["请问有没有既往病史或正在用药？"],
+        followup_count=1,
+    )
+    action, downgraded = gate_by_confidence("ASK_FOLLOWUP", 0.4, state, 3)
+
+    assert action == "CALL_TOOL"
+    assert downgraded is True
+
+
+def test_gate_keeps_rule_choice_without_confidence():
+    """规则决策没有置信度，不参与闸门。"""
+    state = ConsultationState(
+        missing_fields=["持续时间"],
+        followup_count=0,
+        tool_results={"department_suggest": {"department": "神经内科"}},
+    )
+    action, downgraded = gate_by_confidence("FINALIZE", None, state, 3)
+
+    assert action == "FINALIZE"
+    assert downgraded is False
+
+
+def test_choose_auto_uses_rule_in_mock_mode():
+    """未启用模型时不产生任何模型用量。"""
+    state = ConsultationState(missing_fields=["持续时间"], followup_count=0)
+    result = choose_auto(state, max_followups=3)
+
+    assert result.action == "ASK_FOLLOWUP"
+    assert result.confidence is None
+    assert result.usage == {"mode": "mock"}
+
+
+def test_choose_auto_returns_model_reason_and_usage(monkeypatch):
+    """模型路径把动作、依据、置信度和用量一起带回来。"""
+    monkeypatch.setenv("USE_MODEL", "1")
+    import backend.app.agent.decision_llm as decision_llm
+
+    monkeypatch.setattr(
+        decision_llm,
+        "choose_with_meta",
+        lambda state, max_followups: (
+            DecisionChoice(action="FINALIZE", reason="信息已足够", confidence=0.8),
+            _usage(),
+        ),
+    )
+
+    result = choose_auto(ConsultationState(), max_followups=3)
+
+    assert result.action == "FINALIZE"
+    assert result.reason == "信息已足够"
+    assert result.confidence == 0.8
+    assert result.usage["mode"] == "model"
+    assert result.usage["input_tokens"] == 120
+    assert result.usage["cost_estimate"] == 0.0002
+
+
+def test_choose_auto_falls_back_on_llm_error(monkeypatch):
+    """模型调用失败 → 规则兜底，trace 里标记 fallback。"""
+    monkeypatch.setenv("USE_MODEL", "1")
+    import backend.app.agent.decision_llm as decision_llm
+
+    def boom(state, max_followups):
+        raise LLMError("model down", retryable=True)
+
+    monkeypatch.setattr(decision_llm, "choose_with_meta", boom)
+
+    state = ConsultationState(missing_fields=["持续时间"], followup_count=0)
+    result = choose_auto(state, max_followups=3)
+
+    assert result.action == "ASK_FOLLOWUP"
+    assert result.confidence is None
+    assert result.usage["fallback"] is True
+    assert result.usage["error"] == "model down"

@@ -95,9 +95,10 @@ def test_dedup_same_field():
 def test_auto_uses_keyword_in_mock_mode(monkeypatch):
     """未启用模型时走关键词，trace 标记 keyword。"""
     meta = {}
-    facts = extract_facts_auto("头部不适", meta)
+    facts, evidence = extract_facts_auto("头部不适", meta)
 
     assert facts["主要症状"] == ["头部不适"]
+    assert evidence == {}
     assert meta == {"extractor": "keyword"}
 
 
@@ -116,13 +117,14 @@ def test_auto_uses_llm_when_enabled(monkeypatch):
     monkeypatch.setattr(
         intake_llm,
         "extract_facts_with_meta",
-        lambda text: ({"主要症状": ["模型结果"]}, usage),
+        lambda text: ({"主要症状": ["模型结果"]}, {}, usage),
     )
 
     meta = {}
-    facts = extract_facts_auto("随便一句话", meta)
+    facts, evidence = extract_facts_auto("随便一句话", meta)
 
     assert facts == {"主要症状": ["模型结果"]}
+    assert evidence == {}
     assert meta["extractor"] == "llm"
     assert meta["usage"]["input_tokens"] == 10
 
@@ -138,7 +140,8 @@ def test_auto_falls_back_on_llm_error(monkeypatch):
     monkeypatch.setattr(intake_llm, "extract_facts_with_meta", boom)
 
     meta = {}
-    facts = extract_facts_auto("头部不适", meta)
+    facts, evidence = extract_facts_auto("头部不适", meta)
 
     assert facts["主要症状"] == ["头部不适"]
+    assert evidence == {}
     assert meta == {"extractor": "keyword", "fallback": True, "error": "RuntimeError"}
