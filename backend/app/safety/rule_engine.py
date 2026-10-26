@@ -27,6 +27,12 @@ NEGATION_WORDS = ["没有", "无", "不", "没", "不是", "并未", "未曾"]
 # 否定词检查范围：风险词前面取多少个字来检查否定
 NEGATION_WINDOW = 5
 
+# 否定只在本小句内生效，跨过标点就不再算同一个否定
+CLAUSE_MARKS = "，。；！？,.;!?、\n"
+
+# 这些词里的"不/没"是词的一部分，不是否定词
+NON_NEGATION_COMPOUNDS = ("不适", "不舒服", "不得劲", "无力", "不固定")
+
 
 def check_negation(text: str, keyword: str) -> bool:
     """检查风险词前面是否有否定词。有否定返回 True。"""
@@ -37,6 +43,14 @@ def check_negation(text: str, keyword: str) -> bool:
     # 取风险词前面的文字，最多取 NEGATION_WINDOW 个字
     start = max(0, pos - NEGATION_WINDOW)
     before = text[start:pos]  # 风险词前面的文字片段
+
+    # 只保留同一小句：从最后一个标点之后开始算
+    cut = max((before.rfind(mark) for mark in CLAUSE_MARKS), default=-1)
+    before = before[cut + 1:]
+
+    # 去掉"不适""不舒服"这类症状词，避免把词内的"不"当成否定
+    for compound in NON_NEGATION_COMPOUNDS:
+        before = before.replace(compound, "")
 
     # 检查这段文字里有没有否定词
     for neg in NEGATION_WORDS:

@@ -1,7 +1,22 @@
 """Day 6 组件测试：结构化提取覆盖完整、缺失、模糊、否定、多轮追加。案例均为虚构。"""
 
-from backend.app.agent.intake import compute_missing, extract_facts, intake
+from types import SimpleNamespace
+
+import pytest
+
+from backend.app.agent.intake import (
+    compute_missing,
+    extract_facts,
+    extract_facts_auto,
+    intake,
+)
 from backend.app.agent.state import ConsultationState
+
+
+@pytest.fixture(autouse=True)
+def _force_mock(monkeypatch):
+    """默认让本文件跑关键词路径，避免本机 USE_MODEL=1 影响单测。"""
+    monkeypatch.delenv("USE_MODEL", raising=False)
 
 
 def test_complete_extraction():
@@ -75,3 +90,55 @@ def test_dedup_same_field():
     )
     result = intake(state)
     assert result["collected_facts"]["主要症状"] == ["头部不适"]
+
+
+def test_auto_uses_keyword_in_mock_mode(monkeypatch):
+    """未启用模型时走关键词，trace 标记 keyword。"""
+    meta = {}
+    facts = extract_facts_auto("头部不适", meta)
+
+    assert facts["主要症状"] == ["头部不适"]
+    assert meta == {"extractor": "keyword"}
+
+
+def test_auto_uses_llm_when_enabled(monkeypatch):
+    """USE_MODEL=1 时走模型，并把用量写进 meta。"""
+    monkeypatch.setenv("USE_MODEL", "1")
+    import backend.app.agent.intake_llm as intake_llm
+
+    usage = SimpleNamespace(
+        model="qwen-plus",
+        input_tokens=10,
+        output_tokens=5,
+        latency_ms=120,
+        cost_estimate=None,
+    )
+    monkeypatch.setattr(
+        intake_llm,
+        "extract_facts_with_meta",
+        lambda text: ({"主要症状": ["模型结果"]}, usage),
+    )
+
+    meta = {}
+    facts = extract_facts_auto("随便一句话", meta)
+
+    assert facts == {"主要症状": ["模型结果"]}
+    assert meta["extractor"] == "llm"
+    assert meta["usage"]["input_tokens"] == 10
+
+
+def test_auto_falls_back_on_llm_error(monkeypatch):
+    """模型层报错时回退关键词，并把原因留在 meta。"""
+    monkeypatch.setenv("USE_MODEL", "1")
+    import backend.app.agent.intake_llm as intake_llm
+
+    def boom(text):
+        raise RuntimeError("model down")
+
+    monkeypatch.setattr(intake_llm, "extract_facts_with_meta", boom)
+
+    meta = {}
+    facts = extract_facts_auto("头部不适", meta)
+
+    assert facts["主要症状"] == ["头部不适"]
+    assert meta == {"extractor": "keyword", "fallback": True, "error": "RuntimeError"}

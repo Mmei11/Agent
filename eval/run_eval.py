@@ -37,7 +37,9 @@ from backend.app.api.routes import app
 from backend.app.tools.registry import TOOL_REGISTRY
 
 # 保证故障注入案例能走到工具节点的虚构完整输入。
-TOOL_FIXTURE = "头部不适两天，前额，程度轻，暂无其他不适，无病史"
+# 故障案例的固定输入：六个必需字段都写成阳性描述，
+# 保证关键词抽取和模型抽取都能走完追问、直接到达工具节点。
+TOOL_FIXTURE = "头部不适两天，前额，程度轻，伴有恶心，无病史"
 
 
 def reset_api(db_path: Path) -> None:
@@ -189,16 +191,32 @@ def check_case(case: dict[str, Any], client: TestClient, db_path: Path) -> dict[
     nodes = [entry.get("node") for entry in trace]
     # 只从 tool 节点提取被调用的工具名。
     tool_calls = [entry.get("called") for entry in trace if entry.get("node") == "tool"]
-    # 提取 decision 节点事件，用于统计模型调用与 token 用量。
-    action_entries = [entry for entry in trace if entry.get("node") == "decision"]
-    # 每条 decision 事件里都记录了 model_usage；mock 模式不带 token。
-    usage_entries = [entry.get("model_usage") or {} for entry in action_entries]
-    # 真正成功的模型调用次数（不含回退到预设的那次）。
+    # decision 节点的用量记录在 model_usage；intake 节点的模型抽取记录在 usage。
+    decision_usage = [
+        entry.get("model_usage") or {}
+        for entry in trace
+        if entry.get("node") == "decision"
+    ]
+    intake_usage = [
+        entry.get("usage") or {}
+        for entry in trace
+        if entry.get("node") == "intake" and entry.get("usage")
+    ]
+    usage_entries = decision_usage + intake_usage
+    # 成功调用：决策器 mode=model 且未回退，加上真正走模型的 intake。
     model_calls = sum(
-        1 for u in usage_entries if u.get("mode") == "model" and not u.get("fallback")
+        1 for u in decision_usage if u.get("mode") == "model" and not u.get("fallback")
     )
-    # 回退次数：模型失败后由预设接管。
-    fallback_calls = sum(1 for u in usage_entries if u.get("fallback"))
+    model_calls += sum(
+        1
+        for entry in trace
+        if entry.get("node") == "intake" and entry.get("extractor") == "llm"
+    )
+    # 回退次数：决策回退 + intake 回退。
+    fallback_calls = sum(1 for u in decision_usage if u.get("fallback"))
+    fallback_calls += sum(
+        1 for entry in trace if entry.get("node") == "intake" and entry.get("fallback")
+    )
     # 整个会话（多轮累计）的 token 用量。
     input_tokens = sum(u.get("input_tokens") or 0 for u in usage_entries)
     output_tokens = sum(u.get("output_tokens") or 0 for u in usage_entries)

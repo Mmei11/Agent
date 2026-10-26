@@ -1,5 +1,7 @@
 """Day 6：结构化信息提取。从用户输入中提取必要字段，区分已知与缺失。案例均为虚构。"""
 
+import os
+
 from backend.app.agent.state import ConsultationState
 
 REQUIRED_FIELDS = ["主要症状", "持续时间", "部位", "程度", "伴随表现", "已知背景"]
@@ -43,6 +45,45 @@ def compute_missing(collected: dict) -> list:
     return [f for f in REQUIRED_FIELDS if f not in collected]
 
 
+def extract_facts_auto(message: str, meta: dict | None = None) -> dict:
+    """USE_MODEL=1 时走模型抽取，失败或未启用时回退关键词抽取。
+
+    meta 收集本次用了哪个抽取器和用量，由调用方写进 trace。
+    """
+    if os.getenv("USE_MODEL") == "1":
+        try:
+            from backend.app.agent.intake_llm import extract_facts_with_meta
+
+            facts, usage = extract_facts_with_meta(message)
+            if meta is not None:
+                meta.update(
+                    {
+                        "extractor": "llm",
+                        "usage": {
+                            "model": usage.model,
+                            "input_tokens": usage.input_tokens,
+                            "output_tokens": usage.output_tokens,
+                            "latency_ms": usage.latency_ms,
+                            "cost_estimate": usage.cost_estimate,
+                        },
+                    }
+                )
+            return facts
+        except Exception as exc:
+            # 模型层出任何问题都不能打断问诊，回退关键词并把原因留在 trace。
+            if meta is not None:
+                meta.update(
+                    {
+                        "extractor": "keyword",
+                        "fallback": True,
+                        "error": type(exc).__name__,
+                    }
+                )
+    elif meta is not None:
+        meta["extractor"] = "keyword"
+    return extract_facts(message)
+
+
 def intake(state: ConsultationState) -> dict:
     """入口节点：提取字段，合并多轮信息，更新缺失列表。
 
@@ -50,7 +91,8 @@ def intake(state: ConsultationState) -> dict:
     missing_fields 覆盖（每轮重新计算）。
     """
     message = state.latest_user_message
-    new_facts = extract_facts(message)
+    meta = {}
+    new_facts = extract_facts_auto(message, meta)
 
     collected = {k: list(v) for k, v in state.collected_facts.items()}
     for field, values in new_facts.items():
@@ -70,5 +112,5 @@ def intake(state: ConsultationState) -> dict:
         "missing_fields": missing,
         "final_result": {},
         "rendered_text": "",
-        "trace": [{"node": "intake", "extracted": new_facts, "missing": missing}],
+        "trace": [{"node": "intake", "extracted": new_facts, "missing": missing, **meta}],
     }

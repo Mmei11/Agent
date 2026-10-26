@@ -7,6 +7,7 @@ from urllib.request import Request, urlopen  # 发送 HTTP 请求到百炼
 
 from backend.app.agent.followup import select_next_field  # 判断还有没有值得问的字段
 from backend.app.agent.state import ConsultationState  # 状态类型
+from backend.app.llm.client import load_env_file  # 环境变量加载已搬到 llm 层
 
 DEFAULT_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"  # 百炼默认地址
 
@@ -42,36 +43,6 @@ FOLLOWUP_DECLINE_PHRASES = (
 def user_declined_followup(message: str) -> bool:
     """Detect explicit refusal phrases so the graph can stop ordinary follow-up."""
     return any(phrase in message for phrase in FOLLOWUP_DECLINE_PHRASES)
-
-
-def load_env_file() -> None:
-    """读取项目根目录的 .env；终端已有同名变量时以终端为准。"""
-    from pathlib import Path
-
-    # 从 decision.py 往上跳 4 级目录找到项目根目录的 .env
-    env_path = Path(__file__).resolve().parent.parent.parent.parent / ".env"
-    if not env_path.exists():
-        return  # 没有 .env 文件就算了
-
-    allowed_names = {
-        "DASHSCOPE_API_KEY",
-        "DASHSCOPE_BASE_URL",
-        "DASHSCOPE_MODEL",
-        "MODEL_PRICE_INPUT_PER_1K",
-        "MODEL_PRICE_OUTPUT_PER_1K",
-    }  # 只认这几个变量，其余写在 .env 里也不会被读入
-    for line in env_path.read_text(encoding="utf-8").splitlines():  # 逐行读
-        line = line.strip()  # 去掉首尾空白
-        if not line or line.startswith("#"):  # 空行和注释跳过
-            continue
-        name, separator, value = line.partition("=")  # 按 = 拆成变量名和值
-        name = name.strip()
-        if not separator or name not in allowed_names:  # 没有 = 或不是允许的变量名就跳过
-            continue
-        value = value.strip()
-        if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":  # 去掉首尾引号
-            value = value[1:-1]
-        os.environ.setdefault(name, value)  # 终端已有同名变量时不覆盖（终端优先）
 
 
 def estimate_cost(usage: dict) -> float | None:

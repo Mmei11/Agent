@@ -1,0 +1,102 @@
+"""Phase 1 第二课：模型结构化抽取。案例均为虚构。"""
+
+from backend.app.llm.client import LLMResult, chat_structured
+from backend.app.llm.schemas import FIELD_MAP, IntakeFacts
+from backend.app.safety.rule_engine import check_negation
+
+# 症状类字段才需要"证据本身以否定词开头"的额外检查。
+# 背景字段的"无病史""没有过敏史"是有效信息，不能当否定丢掉。
+SYMPTOM_FIELDS = {"chief_complaint", "associated"}
+
+# 只认多字否定前缀，避免把"没什么力气"这种症状误判成否定。
+# 单字"不/没/无"交给 check_negation 看前面的窗口来判。
+NEGATION_PREFIXES = ("没有", "无明显", "未出现", "否认", "不是")
+
+SYSTEM_PROMPT = """你是"模拟问诊"项目的信息抽取器。用户会给你一句虚构病例描述。
+你只做信息抽取，不做诊断，不建议科室，不给用药。
+
+输出一个 JSON 对象，包含以下字段，每个字段都是数组；没抽到就返回 []：
+- chief_complaint 主要症状
+- duration 持续时间（含起病时间）
+- location 部位
+- severity 程度（只描述主要症状）
+- associated 伴随表现
+- background 已知背景
+- aggravating 加重缓解因素
+- pattern 时间模式（发作规律与频次）
+- measurement 测量值（体温、血压等）
+
+每个数组元素包含三个键：
+- value：字段内容，取原文中最短的完整片段，不归一化、不解释
+- evidence：原文中逐字出现的片段，用来证明这个值确实来自原文
+- confidence：0 到 1 的自评置信度
+
+硬规则：
+1. 只抽取原文明确出现的信息，不推断、不补全。
+2. evidence 必须能在原文里逐字找到；找不到就不要输出这个字段。
+3. 否定表达不计入。"没有发热"不填 associated；"没有呼吸困难"不填 chief_complaint。
+4. value 保留原文用词："已经三天了" → "三天"；"三十八度五" → "三十八度五"。
+5. 起病时间归 duration（如"今天早上开始的"）；发作规律和频次归 pattern
+   （如"一阵一阵""晚上更疼""拉了四五次"）。
+6. 用户拒答、无法描述、只给背景时，所有字段返回 []。
+7. 只输出 JSON，不要 Markdown、解释或额外字段。"""
+
+
+def _is_negated(text: str, fact, field: str) -> bool:
+    """值或证据只要有一个被否定，这个字段就不算数。"""
+    for fragment in (fact.value.strip(), fact.evidence.strip()):
+        if not fragment:
+            continue
+        if field in SYMPTOM_FIELDS and fragment.startswith(NEGATION_PREFIXES):
+            return True
+        if check_negation(text, fragment):
+            return True
+    return False
+
+
+def keep_supported(facts: IntakeFacts, text: str) -> IntakeFacts:
+    """三道闸门：证据逐字存在、不被否定；空列表表示作废。"""
+    cleaned = {}
+    for field in FIELD_MAP:
+        kept = []
+        for fact in getattr(facts, field):
+            evidence = fact.evidence.strip()
+            if not evidence or evidence not in text:
+                continue  # 证据不在原文里 → 编造，丢弃
+            if _is_negated(text, fact, field):
+                continue  # 证据被否定 → 不计入
+            kept.append(fact)
+        cleaned[field] = kept
+    return IntakeFacts(**cleaned)
+
+
+def to_field_dict(facts: IntakeFacts) -> dict:
+    """转成评测脚本和 state 使用的中文键名，空字段不写入。"""
+    result = {}
+    for field, chinese_name in FIELD_MAP.items():
+        values = []
+        for fact in getattr(facts, field):
+            value = fact.value.strip()
+            if value and value not in values:
+                values.append(value)
+        if values:
+            result[chinese_name] = values
+    return result
+
+
+def extract_facts_with_meta(text: str) -> tuple[dict, LLMResult]:
+    """抽取并返回用量，供 trace 记录。"""
+    facts, usage = chat_structured(
+        [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": text},
+        ],
+        IntakeFacts,
+        max_tokens=800,
+    )
+    return to_field_dict(keep_supported(facts, text)), usage
+
+
+def extract_facts(text: str) -> dict:
+    """评测脚本的入口：与关键词版同名同形状，方便 A/B 对比。"""
+    return extract_facts_with_meta(text)[0]
