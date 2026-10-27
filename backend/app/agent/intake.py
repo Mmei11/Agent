@@ -3,6 +3,7 @@
 import os
 
 from backend.app.agent.state import ConsultationState
+from backend.app.observability import current_trace
 
 REQUIRED_FIELDS = ["主要症状", "持续时间", "部位", "程度", "伴随表现", "已知背景"]
 
@@ -111,14 +112,25 @@ def intake(state: ConsultationState) -> dict:
                 existing.append(fragment)
 
     missing = compute_missing(collected)
+    scope = current_trace()
 
     return {
         "turn_id": state.turn_id + 1,
+        "trace_id": scope.trace_id if scope else "",
         "conversation": [{"role": "user", "text": message}],
         "collected_facts": collected,
         "fact_evidence": evidence,
         "missing_fields": missing,
         "final_result": {},
         "rendered_text": "",
-        "trace": [{"node": "intake", "extracted": new_facts, "missing": missing, **meta}],
+        # 只留摘要：字段值已经在 collected_facts 里，这里只记数量与抽取方式。
+        "trace": [
+            {
+                "node": "intake",
+                "fact_count": len(new_facts),
+                "missing_count": len(missing),
+                "trace_id": scope.trace_id if scope else "",
+                **meta,
+            }
+        ],
     }

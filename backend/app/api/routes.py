@@ -8,6 +8,7 @@ from fastapi import FastAPI, HTTPException  # FastAPI 框架和 HTTP 错误响�
 from pydantic import BaseModel  # 定义请求和响应的数据结构
 
 from backend.app.agent.graph import build_graph  # 组装 LangGraph 状态图
+from backend.app.observability import start_trace  # 一次请求 = 一条 trace
 from backend.app.storage.saver import DEFAULT_DB_PATH  # SQLite 文件默认路径
 
 # 创建 FastAPI 应用实例，title 和 description 会显示在 Swagger 文档页
@@ -66,6 +67,7 @@ class SessionResponse(BaseModel):
     asked_questions 显示追问历史，final_result 显示最终结果。
     """
     session_id: str  # 会话 ID，前端保存用于后续请求
+    trace_id: str = ""  # 本轮请求的观测 id，可用于跳转完整轨迹
     collected_facts: dict = {}  # 已收集的字段，{"主要症状": ["头部不适"], ...}
     missing_fields: list = []  # 仍缺失的字段名
     asked_questions: list = []  # 已问过的问题列表
@@ -89,10 +91,12 @@ def create_session(req: CreateSessionRequest):
     if req.initial_message.strip():  # 有消息（去掉首尾空格后非空）
         graph = get_app()  # 获取编译后的图
         config = {"configurable": {"thread_id": session_id}}  # 用 session_id 作为 thread_id
-        graph.invoke(  # 调图处理用户消息
-            {"latest_user_message": req.initial_message, "session_id": session_id},
-            config=config,  # 传 config 让 checkpointer 按 thread_id 存档
-        )
+        # 新会话的第一轮；trace 在这里开启，图内的节点 span 都挂在它下面。
+        with start_trace(session_id, turn_id=1):
+            graph.invoke(  # 调图处理用户消息
+                {"latest_user_message": req.initial_message, "session_id": session_id},
+                config=config,  # 传 config 让 checkpointer 按 thread_id 存档
+            )
         return _get_state(session_id)  # 从 checkpointer 读回状态返回
     else:
         # 空会话也落盘，确保返回的 ID 随后能 GET 和发送消息。
@@ -120,14 +124,18 @@ def send_message(session_id: str, req: SendMessageRequest):
     if snapshot.values.get("final_result"):
         raise HTTPException(status_code=409, detail="本轮问诊已结束，请开启新会话")
 
-    result = graph.invoke(  # 调图处理消息，checkpointer 自动恢复之前的 state
-        {"latest_user_message": message, "session_id": session_id},
-        config=config,
-    )
+    # turn_id 在进入图之前算好：intake 节点会把 state.turn_id 加一。
+    turn_id = int((snapshot.values or {}).get("turn_id", 0)) + 1
+    with start_trace(session_id, turn_id=turn_id):
+        result = graph.invoke(  # 调图处理消息，checkpointer 自动恢复之前的 state
+            {"latest_user_message": message, "session_id": session_id},
+            config=config,
+        )
 
     # 把图返回的 state 打包成 SessionResponse 返回给前端
     return SessionResponse(
         session_id=session_id,
+        trace_id=result.get("trace_id", ""),  # 本轮观测 id
         collected_facts=result.get("collected_facts", {}),  # 已收集字段
         missing_fields=result.get("missing_fields", []),  # 仍缺失字段
         asked_questions=result.get("asked_questions", []),  # 追问历史
@@ -173,6 +181,7 @@ def _get_state(session_id: str) -> SessionResponse:
     values = state.values  # 取出状态字典
     return SessionResponse(
         session_id=session_id,
+        trace_id=values.get("trace_id", ""),
         collected_facts=values.get("collected_facts", {}),  # 用 get 兜底，字段可能不存在
         missing_fields=values.get("missing_fields", []),
         asked_questions=values.get("asked_questions", []),

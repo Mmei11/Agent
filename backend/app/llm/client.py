@@ -13,6 +13,8 @@ import instructor
 from openai import APIConnectionError, APITimeoutError, OpenAI
 from pydantic import BaseModel
 
+from backend.app.observability import span
+
 DEFAULT_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 DEFAULT_MODEL = "qwen-plus"
 DEFAULT_TIMEOUT = 10.0  # 单次尝试的超时，不是整次调用的预算
@@ -113,6 +115,42 @@ def _is_retryable(exc: Exception) -> bool:
 _structured_client = None
 
 
+def _llm_span_attributes(
+    *,
+    model: str,
+    operation: str,
+    temperature: float,
+    max_tokens: int,
+    prompt_name: str = "",
+    prompt_version: str = "",
+) -> dict:
+    """按 OpenTelemetry GenAI 语义命名，换观测平台时映射关系不变。"""
+    attributes = {
+        "gen_ai.system": "dashscope",
+        "gen_ai.operation.name": operation,
+        "gen_ai.request.model": model,
+        "gen_ai.request.temperature": temperature,
+        "gen_ai.request.max_tokens": max_tokens,
+    }
+    if prompt_name:
+        attributes["prompt.name"] = prompt_name
+    if prompt_version:
+        attributes["prompt.version"] = prompt_version
+    return attributes
+
+
+def _record_usage(record, result: LLMResult) -> None:
+    """把用量写进当前 span；拿不到的值不写，避免出现误导性的 null。"""
+    record.attributes["gen_ai.response.model"] = result.model
+    if result.input_tokens is not None:
+        record.attributes["gen_ai.usage.input_tokens"] = result.input_tokens
+    if result.output_tokens is not None:
+        record.attributes["gen_ai.usage.output_tokens"] = result.output_tokens
+    if result.cost_estimate is not None:
+        record.attributes["llm.cost_estimate"] = result.cost_estimate
+    record.attributes["llm.latency_ms"] = result.latency_ms
+
+
 def get_structured_client():
     """instructor 包装同一个 OpenAI 客户端，共享地址、Key 和运输层重试。"""
     global _structured_client
@@ -131,6 +169,8 @@ def chat_structured(
     temperature: float = 0.0,
     timeout: float = DEFAULT_TIMEOUT,
     structured_client=None,
+    prompt_name: str = "",
+    prompt_version: str = "",
 ) -> tuple[BaseModel, LLMResult]:
     """请求结构化输出，返回（校验后的对象, 归一化用量）。
 
@@ -139,39 +179,52 @@ def chat_structured(
     """
     active_client = structured_client or get_structured_client()
     active_model = model or os.getenv("DASHSCOPE_MODEL", DEFAULT_MODEL)
-
-    started = time.perf_counter()
-    try:
-        parsed, completion = active_client.chat.completions.create_with_completion(
-            model=active_model,
-            messages=messages,
-            response_model=response_model,
-            max_retries=max_retries,
-            max_tokens=max_tokens,
-            temperature=temperature,
-            timeout=timeout,
-            extra_body={"enable_thinking": False},
-        )
-    except Exception as exc:
-        raise LLMError(
-            f"结构化输出失败：{type(exc).__name__}",
-            retryable=_is_retryable(exc),
-        ) from exc
-
-    latency_ms = round((time.perf_counter() - started) * 1000)
-    choices = getattr(completion, "choices", None)
-    usage = getattr(completion, "usage", None)
-    input_tokens = getattr(usage, "prompt_tokens", None)
-    output_tokens = getattr(usage, "completion_tokens", None)
-
-    return parsed, LLMResult(
-        content=choices[0].message.content if choices else "",
-        model=getattr(completion, "model", None) or active_model,
-        input_tokens=input_tokens,
-        output_tokens=output_tokens,
-        latency_ms=latency_ms,
-        cost_estimate=estimate_cost(input_tokens, output_tokens),
+    attributes = _llm_span_attributes(
+        model=active_model,
+        operation="chat",
+        temperature=temperature,
+        max_tokens=max_tokens,
+        prompt_name=prompt_name,
+        prompt_version=prompt_version,
     )
+
+    with span("llm.chat_structured", kind="llm", attributes=attributes) as record:
+        started = time.perf_counter()
+        try:
+            parsed, completion = active_client.chat.completions.create_with_completion(
+                model=active_model,
+                messages=messages,
+                response_model=response_model,
+                max_retries=max_retries,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                timeout=timeout,
+                extra_body={"enable_thinking": False},
+            )
+        except Exception as exc:
+            # 失败原因留在 span 上；异常仍按原有契约包装成 LLMError。
+            record.attributes["error.retryable"] = _is_retryable(exc)
+            raise LLMError(
+                f"结构化输出失败：{type(exc).__name__}",
+                retryable=_is_retryable(exc),
+            ) from exc
+
+        latency_ms = round((time.perf_counter() - started) * 1000)
+        choices = getattr(completion, "choices", None)
+        usage = getattr(completion, "usage", None)
+        input_tokens = getattr(usage, "prompt_tokens", None)
+        output_tokens = getattr(usage, "completion_tokens", None)
+
+        result = LLMResult(
+            content=choices[0].message.content if choices else "",
+            model=getattr(completion, "model", None) or active_model,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            latency_ms=latency_ms,
+            cost_estimate=estimate_cost(input_tokens, output_tokens),
+        )
+        _record_usage(record, result)
+        return parsed, result
 
 
 def chat(
@@ -183,10 +236,20 @@ def chat(
     temperature: float = 0.0,
     timeout: float = DEFAULT_TIMEOUT,
     client: OpenAI | None = None,
+    prompt_name: str = "",
+    prompt_version: str = "",
 ) -> LLMResult:
     """发一次模型请求，把响应归一化成 LLMResult。"""
     active_client = client or get_client()
     active_model = model or os.getenv("DASHSCOPE_MODEL", DEFAULT_MODEL)
+    attributes = _llm_span_attributes(
+        model=active_model,
+        operation="chat",
+        temperature=temperature,
+        max_tokens=max_tokens,
+        prompt_name=prompt_name,
+        prompt_version=prompt_version,
+    )
 
     kwargs = {
         "model": active_model,
@@ -200,30 +263,34 @@ def chat(
     if response_format is not None:
         kwargs["response_format"] = response_format
 
-    started = time.perf_counter()
-    try:
-        response = active_client.chat.completions.create(**kwargs)
-    except Exception as exc:
-        # 只暴露异常类型，不带 messages 和 Key，避免敏感内容进日志。
-        raise LLMError(
-            f"模型调用失败：{type(exc).__name__}",
-            retryable=_is_retryable(exc),
-        ) from exc
+    with span("llm.chat", kind="llm", attributes=attributes) as record:
+        started = time.perf_counter()
+        try:
+            response = active_client.chat.completions.create(**kwargs)
+        except Exception as exc:
+            record.attributes["error.retryable"] = _is_retryable(exc)
+            # 只暴露异常类型，不带 messages 和 Key，避免敏感内容进日志。
+            raise LLMError(
+                f"模型调用失败：{type(exc).__name__}",
+                retryable=_is_retryable(exc),
+            ) from exc
 
-    latency_ms = round((time.perf_counter() - started) * 1000)
-    choices = getattr(response, "choices", None)
-    if not choices:
-        raise LLMError("模型返回空 choices", retryable=False)
+        latency_ms = round((time.perf_counter() - started) * 1000)
+        choices = getattr(response, "choices", None)
+        if not choices:
+            record.attributes["error.retryable"] = False
+            raise LLMError("模型返回空 choices", retryable=False)
 
-    usage = getattr(response, "usage", None)
-    input_tokens = getattr(usage, "prompt_tokens", None)
-    output_tokens = getattr(usage, "completion_tokens", None)
-
-    return LLMResult(
-        content=choices[0].message.content or "",
-        model=getattr(response, "model", None) or active_model,
-        input_tokens=input_tokens,
-        output_tokens=output_tokens,
-        latency_ms=latency_ms,
-        cost_estimate=estimate_cost(input_tokens, output_tokens),
-    )
+        usage = getattr(response, "usage", None)
+        input_tokens = getattr(usage, "prompt_tokens", None)
+        output_tokens = getattr(usage, "completion_tokens", None)
+        result = LLMResult(
+            content=choices[0].message.content or "",
+            model=getattr(response, "model", None) or active_model,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            latency_ms=latency_ms,
+            cost_estimate=estimate_cost(input_tokens, output_tokens),
+        )
+        _record_usage(record, result)
+        return result

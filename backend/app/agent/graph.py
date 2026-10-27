@@ -18,10 +18,17 @@ from backend.app.agent.result import (
     render_text,
 )
 from backend.app.agent.state import ConsultationState  # 状态类型
+from backend.app.observability import current_trace, traced_node
 from backend.app.safety.rule_engine import final_check, screen  # 风险检查和最终输出检查
 from backend.app.tools.registry import TOOL_REGISTRY  # 工具注册表
 
 MAX_FOLLOWUPS = 3  # 普通追问上限，spec 要求的工程边界
+
+
+def _trace_id() -> str:
+    """当前请求的 trace id；直接调图（单测/脚本）时为空串。"""
+    scope = current_trace()
+    return scope.trace_id if scope else ""
 
 
 def risk_check(state: ConsultationState) -> dict:
@@ -34,7 +41,15 @@ def risk_check(state: ConsultationState) -> dict:
         flags.append(result["rule"])  # 含糊 → V001，保守分流
     return {
         "risk_flags": flags,
-        "trace": [{"node": "risk_check", "screen_result": result}],
+        # 摘要只留级别和规则号，完整 screen 结果不再复制进 checkpoint。
+        "trace": [
+            {
+                "node": "risk_check",
+                "risk_level": result["level"],
+                "rule": result["rule"],
+                "trace_id": _trace_id(),
+            }
+        ],
     }
 
 
@@ -68,6 +83,7 @@ def decision(state: ConsultationState) -> dict:
                 "downgraded_by_confidence": downgraded,  # 是否因低置信度被收回
                 "same": result.action == final_action,  # False 说明被改过
                 "model_usage": result.usage,  # token 用量与成本估算，供 M4 统计
+                "trace_id": _trace_id(),
             }
         ],
     }
@@ -103,15 +119,24 @@ def tool(state: ConsultationState) -> dict:
                 {
                     "node": "tool",
                     "called": tool_name,
+                    "ok": False,
                     "error_type": type(exc).__name__,
-                    "error": error_message,
+                    "trace_id": _trace_id(),
                 }
             ],
         }
     results[tool_name] = result  # 把结构化结果写回字典
     return {
         "tool_results": results,
-        "trace": [{"node": "tool", "called": tool_name, "result": result}],
+        # 工具返回值已经在 tool_results 里，这里只记调用名与成败。
+        "trace": [
+            {
+                "node": "tool",
+                "called": tool_name,
+                "ok": True,
+                "trace_id": _trace_id(),
+            }
+        ],
     }
 
 
@@ -156,7 +181,15 @@ def output(state: ConsultationState) -> dict:
         "final_result": structured,  # 结构化字典，给测试和前端解析
         "rendered_text": rendered,  # 渲染文案，给用户直接看
         "conversation": [{"role": "agent", "text": rendered}],
-        "trace": [{"node": "output", "boundary_check": boundary}],
+        "trace": [
+            {
+                "node": "output",
+                "result_status": structured.get("status"),
+                "boundary_level": boundary["level"],
+                "boundary_rule": boundary.get("rule"),
+                "trace_id": _trace_id(),
+            }
+        ],
     }
 
 
@@ -168,13 +201,13 @@ def build_graph(checkpointer=None):
     """
     graph = StateGraph(ConsultationState)  # 用 ConsultationState 作为图的状态类型
 
-    # 注册六个节点
-    graph.add_node("intake", intake)  # 入口：提取字段
-    graph.add_node("risk_check", risk_check)  # 风险检查
-    graph.add_node("decision", decision)  # 决策：模型或预设选动作
-    graph.add_node("followup", followup)  # 追问：选字段生成问题
-    graph.add_node("tool", tool)  # 工具：调注册表里的受限工具
-    graph.add_node("output", output)  # 输出：渲染最终结果
+    # 注册六个节点：埋点包在注册处，节点函数本身保持纯业务逻辑。
+    graph.add_node("intake", traced_node("intake")(intake))  # 入口：提取字段
+    graph.add_node("risk_check", traced_node("risk_check")(risk_check))  # 风险检查
+    graph.add_node("decision", traced_node("decision")(decision))  # 决策：模型或预设选动作
+    graph.add_node("followup", traced_node("followup")(followup))  # 追问：选字段生成问题
+    graph.add_node("tool", traced_node("tool")(tool))  # 工具：调注册表里的受限工具
+    graph.add_node("output", traced_node("output")(output))  # 输出：渲染最终结果
 
     # 连边
     graph.add_edge(START, "intake")  # 起点 → 入口

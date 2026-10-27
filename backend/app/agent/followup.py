@@ -1,6 +1,7 @@
 """Day 7：动态追问生成。基于缺失字段、已问问题和字段优先级，选一个最有价值的问题。案例均为虚构。"""
 
 from backend.app.agent.state import ConsultationState
+from backend.app.observability import current_trace
 
 # 字段优先级：数字越小优先级越高
 FIELD_PRIORITY = {
@@ -55,6 +56,7 @@ def followup(state: ConsultationState) -> dict:
     """
     field = select_next_field(state.missing_fields, state.asked_questions)
     question = generate_question(field)
+    scope = current_trace()
 
     return {
         "followup_count": state.followup_count + 1,
@@ -64,8 +66,9 @@ def followup(state: ConsultationState) -> dict:
             {
                 "node": "followup",
                 "selected_field": field,
-                "question": question,
                 "count": state.followup_count + 1,
+                "trace_id": scope.trace_id if scope else "",
+                # 问句本身已在 asked_questions 和 conversation 里，不重复存。
             }
         ],
     }

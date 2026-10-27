@@ -12,6 +12,10 @@ SYMPTOM_FIELDS = {"chief_complaint", "associated"}
 # 单字"不/没/无"交给 check_negation 看前面的窗口来判。
 NEGATION_PREFIXES = ("没有", "无明显", "未出现", "否认", "不是")
 
+# 观测用的 prompt 标识：改 prompt 时同步升版本，才能按版本对比指标。
+PROMPT_NAME = "intake.extract"
+PROMPT_VERSION = "v1"
+
 SYSTEM_PROMPT = """你是"模拟问诊"项目的信息抽取器。用户会给你一句虚构病例描述。
 你只做信息抽取，不做诊断，不建议科室，不给用药。
 
@@ -107,6 +111,8 @@ def extract_facts_with_meta(text: str) -> tuple[dict, dict, LLMResult]:
         ],
         IntakeFacts,
         max_tokens=800,
+        prompt_name=PROMPT_NAME,
+        prompt_version=PROMPT_VERSION,
     )
     cleaned = keep_supported(facts, text)
     return to_field_dict(cleaned), to_evidence_dict(cleaned), usage

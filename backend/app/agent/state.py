@@ -5,6 +5,15 @@ from typing import Annotated
 
 from pydantic import BaseModel, Field
 
+# trace 只保留最近这么多条，避免 checkpoint 随对话轮次无限膨胀。
+# 评测集最多 4 轮、约 24 条，80 条留有充足余量。
+MAX_TRACE_ENTRIES = 80
+
+
+def _append_trace(left: list, right: list) -> list:
+    """追加但截断：只保留最近的记录，旧记录由外部观测库负责保存。"""
+    return (list(left) + list(right))[-MAX_TRACE_ENTRIES:]
+
 
 class ConsultationState(BaseModel):
     """LangGraph 在节点之间传递的状态。
@@ -52,5 +61,9 @@ class ConsultationState(BaseModel):
     # rendered_text：从结构化结果渲染的文案，给用户直接看
     rendered_text: str = ""
 
-    # trace：每一步的执行记录，只增不减
-    trace: Annotated[list, operator.add] = []
+    # trace_id：本轮请求在外部观测库里的 id，用于从会话跳转到完整轨迹。
+    trace_id: str = ""
+
+    # trace：每一步的摘要，只增不减但会被截断到 MAX_TRACE_ENTRIES。
+    # 完整细节（模型输入、工具返回）由 observability 的 sink 保存，不再塞进 checkpoint。
+    trace: Annotated[list, _append_trace] = []

@@ -5,6 +5,11 @@ import json
 from backend.app.agent.state import ConsultationState
 from backend.app.llm.client import LLMResult, chat_structured
 from backend.app.llm.schemas import DecisionChoice
+from backend.app.observability import span
+
+# 观测用的 prompt 标识：改 prompt 时同步升版本，才能按版本对比指标。
+PROMPT_NAME = "decision.choose"
+PROMPT_VERSION = "v1"
 
 DECISION_SYSTEM_PROMPT = """你是"模拟问诊"项目的动作选择器。你只决定下一步做什么，不做诊断，不建议科室，不给用药。
 
@@ -65,15 +70,31 @@ def choose_with_meta(
     上下文在这里才被序列化，build_context 保持可单测的纯函数。
     """
     context = build_context(state, max_followups)
-    choice, usage = chat_structured(
-        [
-            {"role": "system", "content": DECISION_SYSTEM_PROMPT},
-            {
-                "role": "user",
-                "content": json.dumps(context, ensure_ascii=False),
-            },
-        ],
-        DecisionChoice,
-        max_tokens=200,
-    )
+    # 只记录“模型看到了哪些字段名/数量”，不落用户原话和字段值。
+    with span(
+        "decision.context",
+        kind="internal",
+        attributes={
+            "decision.missing_fields": context["missing_fields"],
+            "decision.asked_count": len(context["asked_questions"]),
+            "decision.tool_results": sorted(context["tool_results"]),
+            "decision.followup_count": context["followup_count"],
+            "decision.has_evidence": bool(context["fact_evidence"]),
+        },
+    ) as record:
+        choice, usage = chat_structured(
+            [
+                {"role": "system", "content": DECISION_SYSTEM_PROMPT},
+                {
+                    "role": "user",
+                    "content": json.dumps(context, ensure_ascii=False),
+                },
+            ],
+            DecisionChoice,
+            max_tokens=200,
+            prompt_name=PROMPT_NAME,
+            prompt_version=PROMPT_VERSION,
+        )
+        record.attributes["decision.action"] = choice.action
+        record.attributes["decision.confidence"] = choice.confidence
     return choice, usage
