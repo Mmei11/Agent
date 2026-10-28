@@ -16,7 +16,7 @@
 | 2026-10-26 | Phase 1 | 模型抽取接入 intake；修"不适"内"不"的否定误判；工具故障夹具改为抽取器无关 | 0.9325（v1） | 未变 | 未变 | **104 次调用 / 33 案例；71,627 输入 / 5,293 输出 token；约 ¥0.068；0 回退；p50 4.298s / p95 13.726s（按案例）** | — | 模型模式 33/33；调用翻倍，输入 token 约 6.7 倍；约 87% 成本来自抽取 prompt |
 | 2026-10-26 | Phase 1 | 第三课：决策上下文扩到完整状态；模型输出 action/reason/confidence；置信度 <0.6 回退规则；FINALIZE 前必须调用过工具；删除旧 urllib 决策路径 | 0.9268（P 0.8941 / R 0.962，重测；与 0.9325 差 1 FP，属模型波动） | 未变 | 未变 | 104 次调用 / 33 案例；102,748 输入 / 7,777 输出 token；约 ¥0.098；0 回退；p50 5.248s / p95 18.49s；**决策 52 轮，48 与模型一致，0 降级，平均置信度 0.904** | — | 33/33；模型决策真正生效；4 次程序覆盖均为"重复调用工具"被拦；0.6 阈值下置信度闸门一次未触发 |
 | 2026-10-27 | Phase 2 | 第二课：图节点与模型调用埋点；state.trace 改摘要并截断到 80 条；新增 trace_report | 未变 | 未变 | 未变 | **4 轮模型会话 32 span / 8,774 输入 + 627 输出 token / ¥0.008273 / 0 错误；intake p95 3,290ms、decision p95 2,022ms** | — | 会话视图能逐轮展开 span 树；决策子 span 记录 missing_fields、action、confidence；mock 33/33 仍通过 |
-| 2026-10-28 | Phase 2 | 第三课：采集端 PII 脱敏；Langfuse OTLP sink（多 sink 组合）；trace 根 span | 未变 | 未变 | 未变 | 未变（结构变更，不改变评测口径） | — | mock 会话 22 span / 4 trace 在 Langfuse 可见；Langfuse 不可达时主流程 4/4 成功、JSONL 22 行；脱敏后无明文手机号/身份证/姓名 |
+| 2026-10-28 | Phase 3 | 冻结基线（`phase3-baseline`），未改业务代码 | 0.9202（LLM；keyword 0.4865） | 0.3125 / 0.50 / 0.00 | 0.00 | 104 调用 / 33 案例；102,814 输入 / 7,853 输出 token；¥0.097951；0 回退；p50 5.236s / p95 18.846s | — | 33/33；M1 在 Phase 1 波动内；holdout 召回仍为 0 |
 
 ## 基线明细
 
@@ -57,3 +57,15 @@
 - 脱敏实测：Langfuse metadata 中 `note=电话[手机号]，身份证[身份证]`、`user_name=[REDACTED]`，无明文
 - 降级：`LANGFUSE_HOST` 指向不可达端口时，4/4 请求成功，JSONL 仍写满 22 行，进程退出码 0
 - 踩坑：本机 `localhost` 走 IPv6 会让 Docker 端口映射返回 502，Langfuse 地址统一用 `127.0.0.1`
+
+**2026-10-28 · Phase 3 起点（`phase3-baseline`，commit `51d1d4c`）**
+
+- 单测：132 passed / 1.39 s
+- 硬断言：33/33（mock）
+- M1 keyword：F1 0.4865（P 0.8438 / R 0.3418；TP 27 / FP 5 / FN 52）
+- M1 LLM：F1 **0.9202**（P 0.8929 / R 0.9494；TP 75 / FP 9 / FN 4）
+- M2：all 0.3125；dev 0.50；holdout 0.00
+- M3：0.00
+- M5：N/A（judge 尚未建立）
+- M4：模型模式 33 条 33/33；104 次调用 / 0 回退；102,814 输入 + 7,853 输出 token；¥0.097951；p50 5.236s / p95 18.846s / max 27.348s
+- 复现命令：`pytest -q`、`python eval/run_eval.py`、`python eval/risk_probe.py`、`python eval/score_intake.py --extractor ...`

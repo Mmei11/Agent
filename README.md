@@ -318,6 +318,7 @@ USE_MODEL=1 uv run python -m eval.baseline --cases eval/cases.jsonl --output eva
 - [评测使用说明](eval/README.md)：案例字段、Agent runner 和单轮基线命令。
 - [评测报告](docs/eval-report.md)：Day 17 失败基线与 Day 18 修复复测。
 - [指标定义与基线](docs/planning/optimization-metrics.md)：M1–M5 的口径、样本与测量命令。
+- [Phase 3 执行计划](docs/planning/phase3-plan.md)：分层断言、judge、校准、采样、红队与 CI 的课程链路。
 - [指标变更日志](docs/metrics-log.md)：每次改动对应的指标变化与结论。
 - [演示与面试脚本](docs/demo-script.md)：约 4 分钟录屏流程、30 秒／2 分钟项目介绍及常见问题。
 - [20 天开发计划](docs/planning/20-day-plan.md)：项目学习和实现路线。
