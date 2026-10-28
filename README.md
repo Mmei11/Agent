@@ -37,6 +37,8 @@ docker compose up --build
 
 `cp -n` 会在 `.env` 尚不存在时创建模板副本，不会覆盖已有的 `.env`。默认不需要模型密钥，程序使用 mock 决策器；如果需要接入 DashScope，编辑 `.env`：
 
+> 这里启动的是主应用栈（前后端）。可选的本地 Langfuse 观测栈是另一套独立 Compose，见[第二套 Compose](#第二套-composelocal-langfuse-观测栈可选)。
+
 ```dotenv
 USE_MODEL=1
 DASHSCOPE_API_KEY=填入你自己的密钥
@@ -92,6 +94,47 @@ docker compose down -v    # 同时删除数据卷和会话数据
 | `docker compose config` | 检查并展开 Compose 配置。 |
 
 前台运行 `docker compose up` 时，按 `d` 可脱离日志界面并让容器继续运行；按 `Ctrl+C` 会停止前台运行的服务。后台启动后，可随时用 `docker compose logs -f` 查看日志。
+
+### 第二套 Compose：本地 Langfuse 观测栈（可选）
+
+项目里有两套互相独立的 Compose，容器、网络和数据卷互不影响：
+
+| 栈 | Compose 文件 | Compose 项目名 | 包含服务 | 访问端口 |
+| --- | --- | --- | --- | --- |
+| 主应用 | `docker-compose.yml` | `agent`（默认取目录名） | backend、frontend | 8080 |
+| 观测栈 | `docker-compose.observability.yml` | `consultation-observability`（文件内固定） | langfuse-web、langfuse-worker、Postgres、ClickHouse、Redis、MinIO | 3000 等 |
+
+以下命令都在项目根目录运行。Docker 面板里会分别显示为 `agent` 和 `consultation-observability` 两组。**建议所有命令都带 `-f` 指定文件**，这样在项目根目录下不会误操作另一套：
+
+| 操作 | 主应用 | 观测栈 |
+| --- | --- | --- |
+| 启动 | `docker compose -f docker-compose.yml up -d --build` | `docker compose -f docker-compose.observability.yml up -d` |
+| 查看状态 | `docker compose -f docker-compose.yml ps` | `docker compose -f docker-compose.observability.yml ps` |
+| 跟踪日志 | `docker compose -f docker-compose.yml logs -f backend` | `docker compose -f docker-compose.observability.yml logs -f langfuse-web` |
+| 停止（保留数据） | `docker compose -f docker-compose.yml down` | `docker compose -f docker-compose.observability.yml down` |
+| 停止并删除数据 | `docker compose -f docker-compose.yml down -v` | `docker compose -f docker-compose.observability.yml down -v` |
+| 查看所有项目 | `docker compose ls` | 同左 |
+
+观测栈启动后可访问：
+
+| 服务 | 地址 |
+| --- | --- |
+| Langfuse 界面 | <http://localhost:3000> |
+| 本地账号 | `local@example.com` / `localpassword` |
+| Langfuse OTLP 地址 | `http://127.0.0.1:3000` |
+
+首次启动会自动创建组织、项目和本地密钥（`pk-lf-local` / `sk-lf-local`）。在 `.env` 中启用观测：
+
+```dotenv
+TRACE_SINK=jsonl,langfuse
+LANGFUSE_PUBLIC_KEY=pk-lf-local
+LANGFUSE_SECRET_KEY=sk-lf-local
+LANGFUSE_HOST=http://127.0.0.1:3000
+```
+
+注意 `LANGFUSE_HOST` 用 `127.0.0.1`，不要用 `localhost`：本机 `localhost` 可能解析到 IPv6，Docker 端口映射在 `::1` 上会返回 502。
+
+`down -v` 会删除数据卷，请谨慎使用：主应用会清除 SQLite 会话数据；观测栈会清除 Langfuse 的账号、项目和全部轨迹。只想临时释放资源时用 `down`。观测栈约占 3.5 GB 内存，不排查时建议停掉，数据仍保留在卷里。
 
 ## 本机开发运行
 
@@ -239,12 +282,15 @@ USE_MODEL=1 uv run python -m eval.baseline --cases eval/cases.jsonl --output eva
 │   ├── app/
 │   │   ├── agent/       # 状态、图、提取、追问、决策与结果生成
 │   │   ├── api/         # FastAPI 路由与会话 API
+│   │   ├── llm/         # 模型客户端与结构化 Schema
+│   │   ├── observability/ # trace/span、脱敏与 Langfuse sink
 │   │   ├── safety/      # 风险筛查与最终输出边界检查
 │   │   ├── storage/     # SQLite Checkpointer
-│   │   └── tools/       # 受限工具注册表
+│   │   ├── tools/       # 受限工具注册表
+│   │   └── config.py    # 统一加载 .env
 │   └── tests/           # 后端单元与 API 测试
 ├── frontend/            # React + Vite 演示界面
-├── eval/                # 33 条案例、基线脚本与 Agent 评测器
+├── eval/                # 33 条案例、基线脚本、Agent 评测器与轨迹报告
 ├── docs/
 │   ├── assets/          # 演示截图与文档素材
 │   ├── planning/        # 20 天开发计划与项目交接说明
@@ -260,6 +306,7 @@ USE_MODEL=1 uv run python -m eval.baseline --cases eval/cases.jsonl --output eva
 ├── uv.lock              # Python 依赖锁文件
 ├── Dockerfile           # 后端镜像
 ├── docker-compose.yml   # 前后端与 SQLite 数据卷编排
+├── docker-compose.observability.yml # 可选 Langfuse 观测栈
 └── run.py               # 本地图流程演示入口
 ```
 
@@ -270,6 +317,8 @@ USE_MODEL=1 uv run python -m eval.baseline --cases eval/cases.jsonl --output eva
 - [评测计划](docs/eval-plan.md)：案例集设计与指标口径。
 - [评测使用说明](eval/README.md)：案例字段、Agent runner 和单轮基线命令。
 - [评测报告](docs/eval-report.md)：Day 17 失败基线与 Day 18 修复复测。
+- [指标定义与基线](docs/planning/optimization-metrics.md)：M1–M5 的口径、样本与测量命令。
+- [指标变更日志](docs/metrics-log.md)：每次改动对应的指标变化与结论。
 - [演示与面试脚本](docs/demo-script.md)：约 4 分钟录屏流程、30 秒／2 分钟项目介绍及常见问题。
 - [20 天开发计划](docs/planning/20-day-plan.md)：项目学习和实现路线。
 - [项目交接说明](docs/planning/project-handoff.md)：项目背景、学习路线，以及参考资料和对照仓库的来源记录。
