@@ -22,6 +22,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Protocol
 
+from backend.app.config import load_env_file
+from backend.app.observability.redact import redact_record
+
 
 def _now_iso() -> str:
     """墙上时间，用 UTC + 毫秒，便于跨机器、跨时区对齐日志。
@@ -129,16 +132,62 @@ class JsonlSink:
             file.write(line + "\n")
 
 
+class MultiSink:
+    """把一条 span 同时送到多个 sink。
+
+    每个 sink 单独 try：Langfuse 挂了，本地 JSONL 仍然照写。
+    """
+
+    def __init__(self, sinks: list[TraceSink]) -> None:
+        self.sinks = sinks
+
+    def emit(self, record: SpanRecord) -> None:
+        for sink in self.sinks:
+            try:
+                sink.emit(record)
+            except Exception:
+                pass
+
+
 def get_sink() -> TraceSink:
-    """按环境变量选择 sink。
+    """按 TRACE_SINK 选择落点，支持逗号分隔，例如 jsonl,langfuse。
 
     默认 none，避免测试和脚本意外写盘。
-    TRACE_SINK=jsonl 时写文件，路径由 TRACE_PATH 指定。
+    任何一项初始化失败都静默跳过，主流程继续。
     """
-    kind = os.getenv("TRACE_SINK", "none").strip().lower()
-    if kind == "jsonl":
-        return JsonlSink(os.getenv("TRACE_PATH", "logs/traces.jsonl"))
-    return NullSink()
+    # 先读 .env，确保下面能拿到配置。
+    load_env_file()
+
+    # "jsonl,langfuse" → ["jsonl", "langfuse"]，顺手去空格、转小写、丢掉空项。
+    names = [
+        name.strip().lower()
+        for name in os.getenv("TRACE_SINK", "none").split(",")
+        if name.strip()
+    ]
+
+    # 逐个建 sink，只认认识的名字，其余忽略。
+    sinks: list[TraceSink] = []
+    for name in names:
+        if name == "jsonl":
+            # 本地文件；路径可用 TRACE_PATH 覆盖。
+            sinks.append(JsonlSink(os.getenv("TRACE_PATH", "logs/traces.jsonl")))
+        elif name == "langfuse":
+            # 延迟导入：没配置 Langfuse 时不加载 OTel 依赖。
+            from backend.app.observability.langfuse_sink import build_langfuse_sink
+
+            sink = build_langfuse_sink()
+            # 配置不全时返回 None，这里就不加。
+            if sink is not None:
+                sinks.append(sink)
+
+    # 一个都没建成 → 空实现，埋点照跑但不落盘。
+    if not sinks:
+        return NullSink()
+    # 只有一个 → 直接用，省掉包装。
+    if len(sinks) == 1:
+        return sinks[0]
+    # 多个 → 每条 span 同时送进每个 sink。
+    return MultiSink(sinks)
 
 
 @dataclass
@@ -159,10 +208,12 @@ class TraceScope:
     stack: list[SpanRecord] = field(default_factory=list)
 
     def emit(self, record: SpanRecord) -> None:
+        # 采集端脱敏：无论最终去哪个 sink，落盘的都只能是脱敏后的副本。
+        clean = redact_record(record)
         # 先记内存，再写 sink：即使 sink 挂了，本次 trace 的数据仍然完整。
-        self.spans.append(record)
+        self.spans.append(clean)
         try:
-            self.sink.emit(record)
+            self.sink.emit(clean)
         except Exception:
             # 这是“观测不能成为单点故障”的代码形态。
             # 这里故意吞掉异常，不记日志也不上抛；观测故障静默降级。
@@ -202,7 +253,10 @@ def start_trace(session_id: str, turn_id: int, sink: TraceSink | None = None):
     )
     token = _current_scope.set(scope)
     try:
-        yield scope
+        # 每条 trace 有一个根 span，节点和模型调用都挂在它下面。
+        # 这样本地报告和 Langfuse 面板看到的都是完整的一棵树。
+        with span("consultation.turn", kind="trace"):
+            yield scope
     finally:
         # 无论正常结束还是异常退出，都要恢复上下文，避免污染后续请求。
         _current_scope.reset(token)

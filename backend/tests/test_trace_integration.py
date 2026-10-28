@@ -28,11 +28,18 @@ def test_graph_nodes_emit_spans_and_link_trace_id():
         "tool",
         "decision",
         "output",
+        "consultation.turn",
     ]
-    assert all(record.kind == "node" for record in sink.records)
+    assert all(record.kind in ("node", "trace") for record in sink.records)
     assert all(record.session_id == "sess-graph" for record in sink.records)
-    # mock 模式没有模型调用，所有节点都是顶层 span。
-    assert all(record.parent_span_id is None for record in sink.records)
+    # 根 span 是 consultation.turn，所有节点都挂在它下面。
+    root = next(record for record in sink.records if record.name == "consultation.turn")
+    assert root.parent_span_id is None
+    assert all(
+        record.parent_span_id == root.span_id
+        for record in sink.records
+        if record.name != "consultation.turn"
+    )
     assert result["trace_id"] == trace.trace_id
     assert all(entry["trace_id"] == trace.trace_id for entry in result["trace"])
 

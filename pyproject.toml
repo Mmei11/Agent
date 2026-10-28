@@ -18,8 +18,13 @@ dependencies = [
     "langgraph==1.2.14",
     # 使用 SQLite 保存和恢复 LangGraph 的会话状态。
     "langgraph-checkpoint-sqlite==3.1.1",
+    # 可观测性：把 span 送到 Langfuse / 任意 OTLP 后端。
+    "langfuse==5.0.4",
     # 统一模型调用，走百炼的 OpenAI 兼容端点。
     "openai==3.3.0",
+    # 用标准 OTel 协议导出 span，换观测后端不用改埋点。
+    "opentelemetry-sdk==1.45.1",
+    "opentelemetry-exporter-otlp-proto-http==1.45.1",
     # 定义并校验输入、动作和输出的数据结构。
     "pydantic==2.14.1",
     # 运行 FastAPI 应用的服务程序。

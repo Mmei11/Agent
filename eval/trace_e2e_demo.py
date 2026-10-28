@@ -15,10 +15,11 @@ TRACE_PATH.parent.mkdir(parents=True, exist_ok=True)
 TRACE_PATH.unlink(missing_ok=True)
 
 # 必须在导入路由之前设置，get_sink() 和 get_app() 才会读到这些值。
-os.environ["TRACE_SINK"] = "jsonl"
-os.environ["TRACE_PATH"] = str(TRACE_PATH)
+# 用 setdefault 保留外部传入的覆盖值，方便验证 langfuse 与降级场景。
+os.environ.setdefault("TRACE_SINK", "jsonl")
+os.environ.setdefault("TRACE_PATH", str(TRACE_PATH))
 os.environ.setdefault("USE_MODEL", "0")
-os.environ["CONSULTATION_DB_PATH"] = tempfile.mktemp(suffix=".sqlite")
+os.environ.setdefault("CONSULTATION_DB_PATH", tempfile.mktemp(suffix=".sqlite"))
 
 from fastapi.testclient import TestClient  # noqa: E402
 

@@ -7,12 +7,12 @@
 import os
 import time
 from dataclasses import dataclass
-from pathlib import Path
 
 import instructor
 from openai import APIConnectionError, APITimeoutError, OpenAI
 from pydantic import BaseModel
 
+from backend.app.config import load_env_file
 from backend.app.observability import span
 
 DEFAULT_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
@@ -41,35 +41,11 @@ class LLMError(RuntimeError):
         self.retryable = retryable
 
 
-def load_env_file() -> None:
-    """读取项目根目录的 .env；终端已有同名变量时以终端为准。"""
-    env_path = Path(__file__).resolve().parent.parent.parent.parent / ".env"
-    if not env_path.exists():
-        return
-
-    allowed_names = {
-        "DASHSCOPE_API_KEY",
-        "DASHSCOPE_BASE_URL",
-        "DASHSCOPE_MODEL",
-        "MODEL_PRICE_INPUT_PER_1K",
-        "MODEL_PRICE_OUTPUT_PER_1K",
-    }
-    for line in env_path.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if not line or line.startswith("#"):
-            continue
-        name, separator, value = line.partition("=")
-        name = name.strip()
-        if not separator or name not in allowed_names:
-            continue
-        value = value.strip()
-        if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
-            value = value[1:-1]
-        os.environ.setdefault(name, value)
-
-
 def estimate_cost(input_tokens: int | None, output_tokens: int | None) -> float | None:
-    """按环境变量里的单价估算成本；没配单价时返回 None，不瞎猜价格。"""
+    """按环境变量里的单价估算成本；拿不到用量或单价时返回 None，不瞎猜价格。"""
+    if input_tokens is None and output_tokens is None:
+        # 供应商没返回 usage：没有用量就没有成本，不能记成 0。
+        return None
     price_in = os.getenv("MODEL_PRICE_INPUT_PER_1K")
     price_out = os.getenv("MODEL_PRICE_OUTPUT_PER_1K")
     if not price_in or not price_out:

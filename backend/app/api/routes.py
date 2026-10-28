@@ -8,6 +8,7 @@ from fastapi import FastAPI, HTTPException  # FastAPI 框架和 HTTP 错误响�
 from pydantic import BaseModel  # 定义请求和响应的数据结构
 
 from backend.app.agent.graph import build_graph  # 组装 LangGraph 状态图
+from backend.app.config import load_env_file  # 统一读取 .env
 from backend.app.observability import start_trace  # 一次请求 = 一条 trace
 from backend.app.storage.saver import DEFAULT_DB_PATH  # SQLite 文件默认路径
 
@@ -31,6 +32,7 @@ def get_app():
     """
     global _saver, _compiled_app
     if _compiled_app is None:  # 还没创建过
+        load_env_file()
         from langgraph.checkpoint.sqlite import SqliteSaver
 
         # 创建 SQLite 连接，check_same_thread=False 允许多线程共享连接

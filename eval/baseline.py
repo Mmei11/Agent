@@ -14,7 +14,8 @@ import time
 from pathlib import Path
 from urllib.request import Request, urlopen
 
-from backend.app.agent.decision import DEFAULT_BASE_URL, load_env_file
+from backend.app.config import load_env_file
+from backend.app.llm.client import DEFAULT_BASE_URL
 
 
 SYSTEM_PROMPT = (
