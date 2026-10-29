@@ -80,3 +80,14 @@
 - 验收：all 33/33、dev 26/26、holdout 7/7
 - 破坏测试：把 E001 的 `api_status` 改成 500，exit=1，失败原因 `[api_status] 期望 HTTP 500，实际 200`
 - 门禁自检：`eval/self_check.py` 把追问上限从 3 改成 10，正常 exit=0、破坏 exit=1，报告含 `[max_followups]`；140 tests
+
+**2026-10-29 · Phase 3 第 2 课**
+
+- 新增 `eval/judge.py`：`DimensionScore` / `JudgeResult` / `judge_case` / `verdict`；三维 1–5 分、4 分通过，`temperature=0`，prompt `judge.case` v1
+- 输入只含 `conversation`（带 turn 与“用户/系统”标签）、`final_result`、`rendered_text`、`tool_results`；不喂 `expected_actions`，避免 judge 对着答案打分
+- `final_result` 为空时 `evidence_grounding` / `boundary_compliance` 记 `applicable=false`，不参与阈值，避免把“没有结论”算成 0 分或满分
+- 新增 `eval/judge_demo.py`：mock 跑案例 + 真实模型打分，支持 `--case` / `--split` / `--limit` / `--reasons`
+- 单测：144 passed（新增 4 条 judge 离线测试）
+- 10 条 dev 实测：8/10 通过；14,579 输入 + 2,079 输出 token，¥0.0158，p50 4.6s / p95 9.2s
+- 质量层发现：E005 用户已说“肩膀酸痛”，系统仍追问“主要的不适是什么”（硬断言未覆盖）；E009 追问与剧本回答错位，judge 判为跑题
+- 稳定性观察：同一案例跨次运行 E009 4→3、E012 5→4，`temperature=0` 不等于确定，需第 3 课校准
