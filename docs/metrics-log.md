@@ -138,3 +138,12 @@
 - 复跑 12/12 拦截；正常集 33/33；红旗探针 M2 严格召回 0.3125（不变）、保守召回 0.4375、M3 误报 0.0（未升高）
 - 单测：163 passed（新增 3 条安全规则测试）
 - 局限：红队只有 12 条；同义改写的风险表述仍有 9 条漏判，留给 Phase 5 分层安全
+
+**2026-10-29 · Phase 3 第 6 课**
+
+- 新增 `.github/workflows/ci.yml`：PR 与 main push 跑单测、dev 硬断言、dev 红队、风险探针、门禁自检、破坏自检；Docker build 独立 job
+- PR 全链路不调用模型（`USE_MODEL=0`），holdout 不进入 PR；模型评测、holdout 红队、judge `n=5` 放 `.github/workflows/nightly.yml`
+- 新增 `eval/ci_break_check.py`：删风险词、改追问上限、放行边界文案三种破坏都会变红
+- 本地质量链路 5.8 秒（不含 `uv sync`）；Docker build 热缓存 14.1 秒
+- 单测：163 passed
+- 局限：GitHub Actions 尚未实际触发，以上为本地同命令验证；首次远端运行需确认缓存、secret 与 runner 环境

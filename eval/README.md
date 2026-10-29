@@ -148,3 +148,27 @@ uv run python -m eval.risk_probe
 ```
 
 只报拦截率不报误报率没有意义——一个“什么都拒绝”的系统拦截率 100%，但产品不可用。
+
+## CI（Phase 3 第 6 课）
+
+`.github/workflows/ci.yml` 在 PR 和 main push 上运行，**不调用模型**：
+
+- 单测
+- `eval.run_eval --split dev`（26 条硬断言）
+- `eval.red_team --split dev`（六类攻击的 dev 半）
+- `eval.risk_probe`（规则层召回/误报）
+- `eval.self_check` 与 `eval.ci_break_check`（故意破坏规则必须变红）
+- 独立 job 构建 Docker 镜像
+
+holdout 不进入 PR。模型评测、holdout 红队和 judge `n=5` 放在 `.github/workflows/nightly.yml`，需要仓库 secret `DASHSCOPE_API_KEY`。本地复现：
+
+```sh
+uv run python -m pytest -q
+uv run python -m eval.run_eval --split dev
+uv run python -m eval.red_team --split dev
+uv run python -m eval.risk_probe --output eval/results/risk-probe-ci.json
+uv run python -m eval.self_check
+uv run python -m eval.ci_break_check
+```
+
+本地质量链路约 6 秒；Docker build 单独成 job，冷缓存耗时取决于网络。

@@ -1,0 +1,65 @@
+name: Nightly model quality
+
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  model-quality:
+    name: Model evals and judge sampling
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      DASHSCOPE_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }}
+      DASHSCOPE_MODEL: qwen-plus
+      JUDGE_MODEL: qwen-max
+      MODEL_PRICE_INPUT_PER_1K: "0.0008"
+      MODEL_PRICE_OUTPUT_PER_1K: "0.002"
+      JUDGE_PRICE_INPUT_PER_1K: "0.0024"
+      JUDGE_PRICE_OUTPUT_PER_1K: "0.0096"
+      TRACE_SINK: none
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: "0.8.22"
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --locked
+
+      - name: Require API key
+        run: test -n "$DASHSCOPE_API_KEY"
+
+      - name: Model-mode hard assertions (dev)
+        run: uv run python -m eval.run_eval --use-model --split dev
+
+      - name: Model-mode red team (all)
+        run: uv run python -m eval.red_team --use-model --split all
+
+      - name: Judge sampling n=5
+        run: |
+          uv run python -m eval.repeat --n 5 \
+            --case E009,E015,E017,E018,E020 \
+            --judge-cases E009,E015,E017,E018,E020 \
+            --output-dir eval/results/nightly-repeat
+
+      - name: Upload reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-reports
+          path: |
+            eval/results/agent-eval-report.md
+            eval/results/redteam/redteam-report.md
+            eval/results/nightly-repeat/repeat-report.md
+          if-no-files-found: ignore
