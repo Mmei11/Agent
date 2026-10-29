@@ -257,7 +257,11 @@ uv run pytest backend/tests/
 uv run python -m eval.run_eval
 ```
 
-该脚本使用确定性 mock 决策器，通过 FastAPI 测试客户端调用真实 API 和 graph，不需要模型密钥，也不会调用外部模型。它会对 33 个案例检查状态轨迹、风险路由、追问上限、工具结果、错误退路和会话恢复，并生成：
+该脚本使用确定性 mock 决策器，通过 FastAPI 测试客户端调用真实 API 和 graph，不需要模型密钥，也不会调用外部模型。33 个案例分为 `dev` 26 条和 `holdout` 7 条：日常用 `--split dev`，发版前才跑 `--split holdout`，单条调试可用 `--case E001,E030`。
+
+每条案例在 `hard_assertions` 里声明要检查的硬约束（轨迹节点、风险路由、追问上限、工具结果、错误退路、会话恢复等），runner 只负责执行并报告失败断言。报告会同时给出 dev/holdout 分层汇总和逐条失败原因。
+
+该脚本生成：
 
 - `eval/results/agent-eval-results.jsonl`：逐案例的输入、状态和检查结果。
 - `eval/results/agent-eval-report.md`：汇总报告。

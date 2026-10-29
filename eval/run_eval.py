@@ -35,6 +35,8 @@ from backend.app.api import routes
 from backend.app.api.routes import app
 # 工具函数注册表，故障测试会临时替换其中的工具。
 from backend.app.tools.registry import TOOL_REGISTRY
+# 声明式硬断言：每条案例自己声明要检查什么。
+from eval.assertions import CaseObservation, run_hard_assertions
 
 # 保证故障注入案例能走到工具节点的虚构完整输入。
 # 故障案例的固定输入：六个必需字段都写成阳性描述，
@@ -227,139 +229,29 @@ def check_case(case: dict[str, Any], client: TestClient, db_path: Path) -> dict[
     cost_estimate = round(sum(known_costs), 6) if known_costs else None
     # 读取结构化最终结果；尚未结束的会话这里为空字典。
     result = values.get("final_result", {})
-    # 初始化失败原因清单；检查不通过时向其中添加说明。
-    failures: list[str] = []
-
-    # 所有类型的案例都不能超过追问上限。
-    if values.get("followup_count", 0) > MAX_FOLLOWUPS:
-        failures.append(f"追问次数超过上限 {MAX_FOLLOWUPS}")
-    # 只有产生最终结果时才做 schema 检查。
-    if result:
-        # 这是最终结构化结果应包含的字段集合。
-        required_result_keys = {
-            "status", "known_facts", "unknowns", "tools_used", "next_step",
-            "risk_message", "limitations",
-        }
-        # 用集合差找出实际结果中缺失的字段，并排序以保证显示稳定。
-        missing_result_keys = sorted(required_result_keys - result.keys())
-        # 把 schema 缺失情况记录成失败原因。
-        if missing_result_keys:
-            failures.append(f"最终结果缺少 schema 字段：{', '.join(missing_result_keys)}")
-
-    # 按案例的 category 选择对应的验收规则。
-    if category == "invalid":
-        # 空白首轮输入应创建空会话，不运行 graph，也不应决策或调用工具。
-        if response_status != 200 or nodes or tool_calls:
-            failures.append("空白首条输入没有保持为空会话/未执行图的行为")
-    elif category == "risk":
-        # 风险路径应该经过风险检查并进入固定输出。
-        if "risk_check" not in nodes or "output" not in nodes:
-            failures.append("轨迹缺少 risk_check → output")
-        # 风险路径不能落入普通决策、追问或工具调用节点。
-        if any(node in nodes for node in ("decision", "followup", "tool")):
-            failures.append("风险路径进入了普通决策、追问或工具节点")
-        # 检查结构化结果是否标记为 risk_route。
-        if result.get("status") != "risk_route":
-            failures.append(f"期望 risk_route，实际为 {result.get('status')!r}")
-        # 风险状态还应保留命中的规则标记。
-        if not values.get("risk_flags"):
-            failures.append("风险标记为空")
-    elif category == "vague":
-        # 含糊表达应命中 V001 规则。
-        if "V001" not in values.get("risk_flags", []):
-            failures.append("含糊输入没有命中 V001")
-        # 含糊输入应保守分流，不能调用普通工具。
-        if result.get("status") != "risk_route" or "tool" in nodes:
-            failures.append("含糊输入没有保守分流到 risk_route")
-    elif category == "negation":
-        # 否定的风险词不能被误判为肯定风险。
-        if "R001" in values.get("risk_flags", []):
-            failures.append("否定表达误触发 R001")
-        # 该输入仍应被 API 正常接收。
-        if response_status != 200:
-            failures.append(f"API 返回 {response_status}")
-    elif category == "normal":
-        # 普通输入的 API 请求应成功。
-        if response_status != 200:
-            failures.append(f"API 返回 {response_status}")
-        # 普通输入不应带有风险规则标记。
-        if values.get("risk_flags"):
-            failures.append(f"普通输入意外触发风险标记：{values['risk_flags']}")
-        # 从轨迹中筛出追问节点。
-        followups = [entry for entry in trace if entry.get("node") == "followup"]
-        # 每条用户消息最多应触发一次追问。
-        if len(followups) > 1:
-            failures.append("一次用户输入产生多次追问")
-    elif category == "multi_turn":
-        # 多轮处理最后一次调用应成功；None 表示没有处理到任何请求。
-        if response_status not in (200, None):
-            failures.append(f"多轮请求返回 {response_status}")
-        # 再次检查最终追问计数没有越过上限。
-        if values.get("followup_count", 0) > MAX_FOLLOWUPS:
-            failures.append(f"追问次数超过上限 {MAX_FOLLOWUPS}")
-        # 取出问题列表。
-        questions = values.get("asked_questions", [])
-        # 比较原列表与去重后的列表长度，检查有没有重复问题。
-        if len(questions) != len(set(questions)):
-            failures.append("出现重复追问")
-        # E015 专门验证明确拒绝后系统是否仍然继续追问。
-        if case_id == "E015" and messages_seen >= 2 and values.get("followup_count", 0) > 1:
-            failures.append("用户明确拒绝后仍继续追问")
-        # 已完成会话应且只应调用一次科室建议工具。
-        if result.get("status") == "completed" and tool_calls.count("department_suggest") != 1:
-            failures.append("完成结果未且仅调用一次 department_suggest")
-    elif category == "tool_failure":
-        # 空结果注入只返回“没有匹配科室”，不是异常或超时。
-        if injected == "empty_result":
-            # 从状态中读取工具节点实际写下的结果。
-            tool_result = values.get("tool_results", {}).get("department_suggest", {})
-            # 必须确实调用工具且 API 能正常完成请求。
-            if response_status != 200 or not tool_calls:
-                failures.append("空结果注入未走完工具调用路径")
-            # 工具空结果不能冒充为具体科室。
-            if tool_result.get("department") is not None:
-                failures.append("空结果被伪装成有科室建议")
-            # 最终结局应是正常的“无法判断”或结构化错误。
-            if result.get("status") not in ("completed", "error"):
-                failures.append("空结果没有安全结束")
-        else:
-            # 超时必须转换成 HTTP 200 下的结构化 error，而非暴露成 500。
-            if response_status != 200 or result.get("status") != "error":
-                failures.append(
-                    f"工具超时未转为结构化 error（HTTP {response_status}, status={result.get('status')!r}）"
-                )
-    elif category == "state_recovery":
-        # 从输入轮次中收集本案例应在状态中保留的关键信息片段。
-        expected_facts = [
-            # 遍历每条输入消息。
-            token
-            for turn in input_turns
-            # 关注症状、持续时间、部位和程度这几种内容。
-            for token in ("头部不适", "两天", "前额", "轻")
-            # 只有输入里实际出现的片段才作为预期事实。
-            if token in turn
-        ]
-        # 将恢复后的 facts 转为中文 JSON 文本，以便查找关键词。
-        fact_text = json.dumps(values.get("collected_facts", {}), ensure_ascii=False)
-        # 找出在输入中出现但恢复后状态里丢失的事实。
-        missing = [fact for fact in expected_facts if fact not in fact_text]
-        # 丢失事实则判为恢复失败。
-        if missing:
-            failures.append(f"重启恢复后缺少既有事实：{', '.join(missing)}")
-        # 多轮案例必须真的执行过一次 SQLite/graph 重建。
-        if input_turns and len(input_turns) > 1 and not restart_simulated:
-            failures.append("没有执行 SQLite 重开恢复步骤")
-        # 重启后的 API 仍应能正常处理消息。
-        if response_status not in (200, None):
-            failures.append(f"恢复后 API 返回 {response_status}")
-        # 第二个会话必须没有带入第一个会话的 facts。
-        if cross_session_clean is not True:
-            failures.append("独立会话未验证成功或检测到跨会话状态污染")
+    # 断言层需要的全部观测值。
+    observation = CaseObservation(
+        case=case,
+        response_status=response_status,
+        nodes=nodes,
+        tool_calls=tool_calls,
+        result=result,
+        values=values,
+        trace=trace,
+        messages_seen=messages_seen,
+        restart_simulated=restart_simulated,
+        cross_session_clean=cross_session_clean,
+        injected=injected,
+    )
+    # 全局断言 + 案例声明断言；失败原因带断言类型，便于定位。
+    failures = run_hard_assertions(case, observation)
 
     # 返回这条案例的所有重要信息，供 JSONL 和 Markdown 报告使用。
     return {
         # 案例唯一编号。
         "case_id": case_id,
+        # 分层：dev 用于日常调试，holdout 只在发版前跑。
+        "split": case.get("split", "dev"),
         # 案例分类。
         "category": category,
         # 没有失败原因即通过，否则失败。
@@ -406,9 +298,23 @@ def check_case(case: dict[str, Any], client: TestClient, db_path: Path) -> dict[
     }
 
 
-def run(cases_path: Path, output_dir: Path, limit: int | None = None, use_model: bool = False) -> int:
+def run(
+    cases_path: Path,
+    output_dir: Path,
+    limit: int | None = None,
+    use_model: bool = False,
+    split: str = "all",
+    case_ids: list[str] | None = None,
+) -> int:
     # 读取 JSONL 文件：跳过空行，把每一行解码成一个案例字典。
     cases = [json.loads(line) for line in cases_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    # 只跑指定案例 ID，便于单条调试和破坏测试。
+    if case_ids:
+        wanted = set(case_ids)
+        cases = [case for case in cases if case["id"] in wanted]
+    # 分层过滤：dev 日常跑，holdout 只在发版前跑。
+    if split != "all":
+        cases = [case for case in cases if case.get("split", "dev") == split]
     # 可选地只运行前 limit 条，方便快速抽查。
     if limit is not None:
         cases = cases[:limit]
@@ -468,6 +374,8 @@ def run(cases_path: Path, output_dir: Path, limit: int | None = None, use_model:
         "",
         # 显示总案例数、通过数和失败数。
         f"- 案例：{len(results)}；通过：{passed}；失败：{len(results) - passed}",
+        # 说明本次跑的是哪一层。
+        f"- 分层：{split}",
         # 说明通过何种入口、用的是模型还是预设决策器。
         "- 模式：FastAPI TestClient → 真实应用 graph；决策器为"
         + ("真实模型（USE_MODEL=1），会调用外部 API。" if use_model else "确定性 mock，不调用外部模型。"),
@@ -480,17 +388,17 @@ def run(cases_path: Path, output_dir: Path, limit: int | None = None, use_model:
         "## 案例结果",
         "",
         # Markdown 表格列名。
-        "| ID | 类别 | 结果 | HTTP | final status | 轨迹节点 | 工具 | 失败原因 |",
+        "| ID | 分层 | 类别 | 结果 | HTTP | final status | 轨迹节点 | 工具 | 失败原因 |",
         # Markdown 表格分隔行。
-        "|---|---|---|---:|---|---|---|---|",
+        "|---|---|---|---|---:|---|---|---|---|",
     ]
     # 遍历结果列表，把每条结果转换成 Markdown 表格行。
     for row in results:
         # 将多个失败原因连接起来；无失败时显示破折号。
         fail_text = "；".join(row["failures"]) or "—"
-        # 把 ID、状态、轨迹、工具和错误原因写进表格的一行。
+        # 把 ID、分层、状态、轨迹、工具和错误原因写进表格的一行。
         lines.append(
-            f"| {row['case_id']} | {row['category']} | {row['status']} | {row['response_status']} "
+            f"| {row['case_id']} | {row['split']} | {row['category']} | {row['status']} | {row['response_status']} "
             f"| {row['result_status'] or '—'} | {' → '.join(row['trace_nodes']) or '—'} "
             f"| {', '.join(row['tool_calls']) or '—'} | {fail_text} |"
         )
@@ -504,6 +412,13 @@ def run(cases_path: Path, output_dir: Path, limit: int | None = None, use_model:
         category_passed = sum(r["status"] == "pass" for r in category_results)
         # 汇总总数、通过数和失败数。
         lines.append(f"| {category} | {total} | {category_passed} | {total - category_passed} |")
+    # 追加分层汇总表：dev 与 holdout 分开看。
+    splits = Counter(row["split"] for row in results)
+    lines += ["", "## 分层汇总", "", "| 分层 | 案例数 | 通过 | 失败 |", "|---|---:|---:|---:|"]
+    for split_name, total in sorted(splits.items()):
+        split_results = [r for r in results if r["split"] == split_name]
+        split_passed = sum(r["status"] == "pass" for r in split_results)
+        lines.append(f"| {split_name} | {total} | {split_passed} | {total - split_passed} |")
     # 汇总模型用量（M4 指标）。
     total_calls = sum(r["model_calls"] for r in results)
     total_fallbacks = sum(r["fallback_calls"] for r in results)
@@ -573,10 +488,33 @@ def main() -> int:
         action="store_true",
         help="用真实模型做决策（会调用外部 API 并产生费用）；不加则用确定性 mock",
     )
+    parser.add_argument(
+        "--split",
+        choices=["all", "dev", "holdout"],
+        default="all",
+        help="只跑某一层：dev 日常用，holdout 只在发版前跑",
+    )
+    parser.add_argument(
+        "--case",
+        dest="case_ids",
+        help="只跑指定案例 ID，逗号分隔，例如 E001,E030",
+    )
     # 解析用户实际传入的命令行参数。
     args = parser.parse_args()
+    case_ids = (
+        [item.strip() for item in args.case_ids.split(",") if item.strip()]
+        if args.case_ids
+        else None
+    )
     # 将命令行参数传给 run，并返回它产生的退出码。
-    return run(args.cases, args.output_dir, args.limit, args.use_model)
+    return run(
+        args.cases,
+        args.output_dir,
+        args.limit,
+        args.use_model,
+        split=args.split,
+        case_ids=case_ids,
+    )
 
 
 # 只有直接运行 python -m eval.run_eval 时才进入命令行主流程。

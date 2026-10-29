@@ -28,10 +28,13 @@ failure.
 
 Each JSONL object contains:
 
-- `id`, `category`, `input_turns`
+- `id`, `split`, `category`, `input_turns`
 - `expected_actions`, `expected_tools`
+- `hard_assertions`: 声明式硬约束列表，runner 逐个执行
 - `prohibited_behaviors`
 - `human_review`
+
+`split` 为 `dev` 或 `holdout`。dev 用于日常调试；holdout 只在发版前运行，避免看过答案再调规则。
 
 Expected action descriptions can be semantic when the case tests a family of
 valid trajectories. The Day 17 runner applies executable software-behavior
@@ -51,6 +54,33 @@ The runner writes `eval/results/agent-eval-results.jsonl` and
 `eval/results/agent-eval-report.md`. It inspects the persisted graph trace to
 check routing and tool use. Failures are recorded per case; the command exits
 nonzero if any case fails.
+
+### 分层与断言（Phase 3）
+
+默认跑全部 33 条；日常只跑 dev，发版前再跑 holdout：
+
+```sh
+uv run python -m eval.run_eval --split dev
+uv run python -m eval.run_eval --split holdout
+```
+
+单条调试：
+
+```sh
+uv run python -m eval.run_eval --case E001,E030
+```
+
+每条案例的 `hard_assertions` 支持：`api_status`、`node_present`、`node_absent`、
+`node_count_max`、`result_status`、`risk_flags`、`trace_count_max`、
+`asked_questions_unique`、`refusal_stops_followup`、`tool_calls_count`、
+`tool_calls_present`、`tool_result_field`、`facts_preserved`、`restart_simulated`、
+`cross_session_clean`。未知断言类型会直接判失败，不会静默跳过。
+
+门禁自检：故意把追问上限从 3 改成 10，确认评测会失败：
+
+```sh
+uv run python -m eval.self_check
+```
 
 ## Model-mode run (M4 baseline)
 

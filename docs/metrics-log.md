@@ -17,6 +17,7 @@
 | 2026-10-26 | Phase 1 | 第三课：决策上下文扩到完整状态；模型输出 action/reason/confidence；置信度 <0.6 回退规则；FINALIZE 前必须调用过工具；删除旧 urllib 决策路径 | 0.9268（P 0.8941 / R 0.962，重测；与 0.9325 差 1 FP，属模型波动） | 未变 | 未变 | 104 次调用 / 33 案例；102,748 输入 / 7,777 输出 token；约 ¥0.098；0 回退；p50 5.248s / p95 18.49s；**决策 52 轮，48 与模型一致，0 降级，平均置信度 0.904** | — | 33/33；模型决策真正生效；4 次程序覆盖均为"重复调用工具"被拦；0.6 阈值下置信度闸门一次未触发 |
 | 2026-10-27 | Phase 2 | 第二课：图节点与模型调用埋点；state.trace 改摘要并截断到 80 条；新增 trace_report | 未变 | 未变 | 未变 | **4 轮模型会话 32 span / 8,774 输入 + 627 输出 token / ¥0.008273 / 0 错误；intake p95 3,290ms、decision p95 2,022ms** | — | 会话视图能逐轮展开 span 树；决策子 span 记录 missing_fields、action、confidence；mock 33/33 仍通过 |
 | 2026-10-28 | Phase 3 | 冻结基线（`phase3-baseline`），未改业务代码 | 0.9202（LLM；keyword 0.4865） | 0.3125 / 0.50 / 0.00 | 0.00 | 104 调用 / 33 案例；102,814 输入 / 7,853 输出 token；¥0.097951；0 回退；p50 5.236s / p95 18.846s | — | 33/33；M1 在 Phase 1 波动内；holdout 召回仍为 0 |
+| 2026-10-28 | Phase 3 | 第 1 课：33 条案例改为声明式硬断言，划 dev 26 / holdout 7；runner 增加 `--split` / `--case` | 未变 | 未变 | 未变 | 未变 | — | 33/33、dev 26/26、holdout 7/7；139 tests；故意改错断言 exit=1 |
 
 ## 基线明细
 
@@ -69,3 +70,13 @@
 - M5：N/A（judge 尚未建立）
 - M4：模型模式 33 条 33/33；104 次调用 / 0 回退；102,814 输入 + 7,853 输出 token；¥0.097951；p50 5.236s / p95 18.846s / max 27.348s
 - 复现命令：`pytest -q`、`python eval/run_eval.py`、`python eval/risk_probe.py`、`python eval/score_intake.py --extractor ...`
+
+**2026-10-28 · Phase 3 第 1 课**
+
+- 新增 `eval/assertions.py`：声明式断言注册表与 `CaseObservation`
+- `eval/cases.jsonl` 增加 `split` 与 `hard_assertions`；dev 26 / holdout 7
+- runner 新增 `--split` / `--case`，报告增加分层汇总与断言类型
+- 单测：139 passed（新增 7 条断言与案例 schema 测试）
+- 验收：all 33/33、dev 26/26、holdout 7/7
+- 破坏测试：把 E001 的 `api_status` 改成 500，exit=1，失败原因 `[api_status] 期望 HTTP 500，实际 200`
+- 门禁自检：`eval/self_check.py` 把追问上限从 3 改成 10，正常 exit=0、破坏 exit=1，报告含 `[max_followups]`；140 tests
