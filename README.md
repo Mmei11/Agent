@@ -266,7 +266,7 @@ uv run python -m eval.run_eval
 - `eval/results/agent-eval-results.jsonl`：逐案例的输入、状态和检查结果。
 - `eval/results/agent-eval-report.md`：汇总报告。
 
-输出目录被 Git 忽略。当前已记录的结果为三轮独立运行均 33/33 通过；口径与限制见[评测报告](docs/eval-report.md)。
+输出目录被 Git 忽略。当前已记录的结果为三轮独立运行均 33/33 通过；Day 17 的失败/修复复盘见[评测报告](docs/eval-report.md)，Phase 3 的分层、judge、稳定性与红队结果见[Phase 3 评测报告](docs/eval-report-phase3.md)。
 
 ### 单轮模型基线（可选，会产生模型调用）
 
@@ -321,6 +321,7 @@ USE_MODEL=1 uv run python -m eval.baseline --cases eval/cases.jsonl --output eva
 - [评测计划](docs/eval-plan.md)：案例集设计与指标口径。
 - [评测使用说明](eval/README.md)：案例字段、Agent runner 和单轮基线命令。
 - [评测报告](docs/eval-report.md)：Day 17 失败基线与 Day 18 修复复测。
+- [Phase 3 评测报告](docs/eval-report-phase3.md)：硬断言、judge 校准、n=5 稳定性、红队与 CI 的系统性结论。
 - [指标定义与基线](docs/planning/optimization-metrics.md)：M1–M5 的口径、样本与测量命令。
 - [Phase 3 执行计划](docs/planning/phase3-plan.md)：分层断言、judge、校准、采样、红队与 CI 的课程链路。
 - [指标变更日志](docs/metrics-log.md)：每次改动对应的指标变化与结论。
