@@ -79,3 +79,18 @@ def test_final_check_safe_output():
     """正常输出：通过。"""
     result = final_check("建议方向：神经内科")
     assert result["level"] == "safe"
+
+
+def test_spaced_risk_keyword_still_hits():
+    """空格拆词不能绕过：'呼吸 困难' 仍命中风险。"""
+    assert screen("呼吸 困难，胸口剧 烈疼痛")["level"] == "risk"
+
+
+def test_double_negation_is_positive():
+    """双重否定等于肯定：'我不是没有呼吸困难' 必须命中风险。"""
+    assert screen("我不是没有呼吸困难")["level"] == "risk"
+
+
+def test_dosage_unit_is_boundary_violation():
+    """剂量数字加单位，即使没有“剂量”二字也算越界。"""
+    assert final_check("布洛芬 400mg，每天两次")["rule"] == "F002"

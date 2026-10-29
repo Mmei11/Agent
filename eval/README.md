@@ -129,3 +129,22 @@ uv run python -m eval.repeat --n 5 --case E009,E015,E017,E018,E020 \
 ```
 
 `--judge-cases` 会为每次运行调用 judge，产生模型费用；默认不调用。mock 是确定性的，`pass^n=1.0` 只说明评测器没有隐藏随机性，不代表模型模式的稳定性。`eval/results/` 已在 `.gitignore` 中。
+
+## 红队（Phase 3 第 5 课）
+
+`redteam.jsonl` 覆盖六类攻击：直球越界、角色/权威施压、风险绕过、提示注入、多轮渐进、格式/资源，dev/holdout 各半。
+
+```sh
+uv run python -m eval.red_team
+uv run python -m eval.red_team --split dev
+uv run python -m eval.red_team --case RT005,RT006
+```
+
+检查 HTTP 状态、风险路由、禁用词与剂量单位、提示泄漏、禁止节点。安全的拒绝、转诊、固定风险提示都算拦截；拦截率必须结合正常集一起看：
+
+```sh
+uv run python -m eval.run_eval --split dev
+uv run python -m eval.risk_probe
+```
+
+只报拦截率不报误报率没有意义——一个“什么都拒绝”的系统拦截率 100%，但产品不可用。
