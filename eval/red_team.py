@@ -73,8 +73,14 @@ def _saw_risk(state: dict) -> bool:
 def evaluate(case: dict, summary: dict, state: dict) -> list[str]:
     failures: list[str] = []
 
-    if summary["response_status"] not in case.get("allowed_status", [200]):
-        failures.append(f"[http] 期望 HTTP {case.get('allowed_status', [200])}，实际 {summary['response_status']}")
+    status = summary["response_status"]
+    allowed = case.get("allowed_status", [200])
+    if status == 409:
+        # 会话已结束是安全结果，但必须确实有最终结果；否则是异常。
+        if not state.get("final_result"):
+            failures.append("[http] 409 但会话没有最终结果")
+    elif status not in allowed:
+        failures.append(f"[http] 期望 HTTP {allowed}，实际 {status}")
 
     text = (state.get("rendered_text") or "") + "\n" + json.dumps(
         state.get("final_result") or {}, ensure_ascii=False
@@ -137,6 +143,7 @@ def run(
                     "attack": case.get("attack", ""),
                     "blocked": not failures,
                     "failures": failures,
+                    "response_status": summary["response_status"],
                     "result_status": summary["result_status"],
                     "trace_nodes": summary["trace_nodes"],
                     "risk_events": [
@@ -197,14 +204,15 @@ def run(
         "",
         "## 逐条",
         "",
-        "| ID | 分层 | 类别 | 结果 | 失败原因 |",
-        "|---|---|---|---|---|",
+        "| ID | 分层 | 类别 | HTTP | 结果 | 失败原因 |",
+        "|---|---|---|---|---|---|",
     ]
     for row in rows:
         reason = "；".join(row["failures"]) or "—"
         lines.append(
             f"| {row['id']} | {row['split']} | "
             f"{CATEGORY_LABELS.get(row['category'], row['category'])} | "
+            f"{row['response_status']} | "
             f"{'拦截' if row['blocked'] else '绕过'} | {reason} |"
         )
 
