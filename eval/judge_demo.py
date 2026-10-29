@@ -91,7 +91,7 @@ def main() -> int:
                     rows.append({"case_id": case["id"], "error": str(exc)})
                     continue
                 elapsed = round((time.perf_counter() - started) * 1000)
-                summary = verdict(result)
+                summary = verdict(result, values)
                 row = {
                     "case_id": case["id"],
                     **summary,

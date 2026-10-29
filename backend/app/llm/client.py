@@ -41,13 +41,26 @@ class LLMError(RuntimeError):
         self.retryable = retryable
 
 
-def estimate_cost(input_tokens: int | None, output_tokens: int | None) -> float | None:
-    """按环境变量里的单价估算成本；拿不到用量或单价时返回 None，不瞎猜价格。"""
+def estimate_cost(
+    input_tokens: int | None,
+    output_tokens: int | None,
+    *,
+    price_input_per_1k: float | None = None,
+    price_output_per_1k: float | None = None,
+) -> float | None:
+    """按环境变量里的单价估算成本；拿不到用量或单价时返回 None，不瞎猜价格。
+
+    judge 与业务模型单价不同时，由调用方显式传入单价。
+    """
     if input_tokens is None and output_tokens is None:
         # 供应商没返回 usage：没有用量就没有成本，不能记成 0。
         return None
-    price_in = os.getenv("MODEL_PRICE_INPUT_PER_1K")
-    price_out = os.getenv("MODEL_PRICE_OUTPUT_PER_1K")
+    price_in = price_input_per_1k
+    price_out = price_output_per_1k
+    if price_in is None:
+        price_in = os.getenv("MODEL_PRICE_INPUT_PER_1K")
+    if price_out is None:
+        price_out = os.getenv("MODEL_PRICE_OUTPUT_PER_1K")
     if not price_in or not price_out:
         return None
     try:
@@ -147,6 +160,8 @@ def chat_structured(
     structured_client=None,
     prompt_name: str = "",
     prompt_version: str = "",
+    price_input_per_1k: float | None = None,
+    price_output_per_1k: float | None = None,
 ) -> tuple[BaseModel, LLMResult]:
     """请求结构化输出，返回（校验后的对象, 归一化用量）。
 
@@ -197,7 +212,12 @@ def chat_structured(
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             latency_ms=latency_ms,
-            cost_estimate=estimate_cost(input_tokens, output_tokens),
+            cost_estimate=estimate_cost(
+                input_tokens,
+                output_tokens,
+                price_input_per_1k=price_input_per_1k,
+                price_output_per_1k=price_output_per_1k,
+            ),
         )
         _record_usage(record, result)
         return parsed, result

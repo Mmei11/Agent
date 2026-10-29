@@ -15,6 +15,10 @@ ALLOWED_NAMES = {
     "DASHSCOPE_MODEL",
     "MODEL_PRICE_INPUT_PER_1K",
     "MODEL_PRICE_OUTPUT_PER_1K",
+    # judge 用独立模型与单价：判分模型可以比业务模型更强、更贵。
+    "JUDGE_MODEL",
+    "JUDGE_PRICE_INPUT_PER_1K",
+    "JUDGE_PRICE_OUTPUT_PER_1K",
     # 运行开关
     "USE_MODEL",
     "CONSULTATION_DB_PATH",

@@ -2,30 +2,30 @@
 
 import json
 
+from eval.calibrate_judge import _read_text
 from eval.judge import (
     DimensionScore,
     JudgeResult,
+    PROMPT_VERSION,
     build_payload,
     judge_case,
     verdict,
 )
 
 
-def _score(value: int, applicable: bool = True) -> DimensionScore:
-    return DimensionScore(score=value, applicable=applicable, reason="r", evidence="e")
+def _score(value: int) -> DimensionScore:
+    return DimensionScore(score=value, reason="r", evidence="e")
 
 
 def _result(
     followup: int = 5,
     grounding: int = 5,
     boundary: int = 5,
-    grounding_applicable: bool = True,
-    boundary_applicable: bool = True,
 ) -> JudgeResult:
     return JudgeResult(
         followup_relevance=_score(followup),
-        evidence_grounding=_score(grounding, grounding_applicable),
-        boundary_compliance=_score(boundary, boundary_applicable),
+        evidence_grounding=_score(grounding),
+        boundary_compliance=_score(boundary),
     )
 
 
@@ -54,17 +54,19 @@ def test_build_payload_labels_speakers_and_drops_expected_answers():
     assert "prohibited_behaviors" not in payload
 
 
-def test_verdict_ignores_not_applicable_dimensions():
-    summary = verdict(
-        _result(5, 1, 1, grounding_applicable=False, boundary_applicable=False)
-    )
+def test_verdict_marks_result_dimensions_not_applicable_without_final_result():
+    summary = verdict(_result(5, 1, 1), {"final_result": {}})
 
     assert summary["passed"] is True
-    assert summary["failed_dimensions"] == []
+    assert summary["applicable"]["evidence_grounding"] is False
+    assert summary["applicable"]["boundary_compliance"] is False
 
 
 def test_verdict_fails_below_threshold():
-    summary = verdict(_result(followup=3))
+    summary = verdict(
+        _result(followup=3),
+        {"final_result": {"status": "completed"}},
+    )
 
     assert summary["passed"] is False
     assert summary["failed_dimensions"] == ["followup_relevance"]
@@ -87,5 +89,29 @@ def test_judge_case_uses_zero_temperature_and_versioned_prompt():
     assert result.followup_relevance.score == 5
     assert captured["temperature"] == 0.0
     assert captured["prompt_name"] == "judge.case"
-    assert captured["prompt_version"] == "v1"
+    assert captured["prompt_version"] == PROMPT_VERSION
     assert json.loads(captured["messages"][1]["content"])["final_result"] == {}
+
+
+def test_judge_case_uses_independent_model_and_prices(monkeypatch):
+    monkeypatch.setenv("JUDGE_MODEL", "qwen-max")
+    monkeypatch.setenv("JUDGE_PRICE_INPUT_PER_1K", "0.0024")
+    monkeypatch.setenv("JUDGE_PRICE_OUTPUT_PER_1K", "0.0096")
+    captured: dict = {}
+
+    def fake_llm(messages, response_model, **kwargs):
+        captured.update(kwargs)
+        return _result(), object()
+
+    judge_case({"conversation": [], "final_result": {}}, judge_llm=fake_llm)
+
+    assert captured["model"] == "qwen-max"
+    assert captured["price_input_per_1k"] == 0.0024
+    assert captured["price_output_per_1k"] == 0.0096
+
+
+def test_read_text_accepts_gb18030(tmp_path):
+    path = tmp_path / "labels.csv"
+    path.write_bytes("sample_id,label,note\nS001,pass,中文备注\n".encode("gb18030"))
+
+    assert "中文备注" in _read_text(path)
