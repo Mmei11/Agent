@@ -25,10 +25,13 @@ from eval.judge import (
     PASS_SCORE,
     PROMPT_VERSION,
     SYSTEM_PROMPT,
+    DimensionScore,
+    JudgeResult,
     build_payload,
     judge_case,
     verdict,
 )
+from eval.followup_check import analyze_followups, score_followups
 from eval.judge_demo import run_case
 
 DIMENSION_LABELS = {
@@ -110,8 +113,24 @@ def export(
         client = TestClient(app)
         for index, case in enumerate(cases):
             values = run_case(case, client, Path(temporary) / f"case-{index}.sqlite")
-            result, usage = judge_case(values)
-            models.add(usage.model)
+            if values.get("final_result"):
+                result, usage = judge_case(values)
+                models.add(usage.model)
+            else:
+                # 没有结论就没有有据/边界可评；追问是代码算的，不必调模型。
+                followup = score_followups(
+                    analyze_followups(values.get("conversation", []))
+                )
+                result = JudgeResult(
+                    followup_relevance=DimensionScore(**followup),
+                    evidence_grounding=DimensionScore(
+                        score=5, reason="未产生最终结果，不适用", evidence="无"
+                    ),
+                    boundary_compliance=DimensionScore(
+                        score=5, reason="未产生最终结果，不适用", evidence="无"
+                    ),
+                )
+                usage = None
             summary = verdict(result, values)
             for dimension in DIMENSIONS:
                 if not summary["applicable"][dimension]:
@@ -130,9 +149,9 @@ def export(
                             "evidence": detail.evidence,
                         },
                         "judge_usage": {
-                            "input_tokens": usage.input_tokens,
-                            "output_tokens": usage.output_tokens,
-                            "cost_estimate": usage.cost_estimate,
+                            "input_tokens": usage.input_tokens if usage else 0,
+                            "output_tokens": usage.output_tokens if usage else 0,
+                            "cost_estimate": usage.cost_estimate if usage else 0.0,
                         },
                     }
                 )
@@ -300,7 +319,8 @@ def score(output_dir: Path, threshold: float) -> int:
         "",
         f"- 标注文件：`{label_path}`",
         f"- 标注文件 SHA-256：`{hashlib.sha256(label_path.read_bytes()).hexdigest()}`",
-        f"- judge 模型：`{', '.join(manifest.get('judge_model', ['未知']))}`",
+        f"- judge 模型：`{', '.join(manifest.get('judge_model', ['未知']))}`（有据 / 边界）",
+        "- 追问相关性：确定性规则（`eval/followup_check.py`），不调用模型",
         f"- judge prompt：`judge.case` {PROMPT_VERSION}",
         f"- 通过阈值：{PASS_SCORE} 分",
         "",

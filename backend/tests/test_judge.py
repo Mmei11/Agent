@@ -5,6 +5,7 @@ import json
 from eval.calibrate_judge import _read_text
 from eval.judge import (
     DimensionScore,
+    JudgeLLMResult,
     JudgeResult,
     PROMPT_VERSION,
     build_payload,
@@ -15,6 +16,13 @@ from eval.judge import (
 
 def _score(value: int) -> DimensionScore:
     return DimensionScore(score=value, reason="r", evidence="e")
+
+
+def _llm_result(grounding: int = 5, boundary: int = 5) -> JudgeLLMResult:
+    return JudgeLLMResult(
+        evidence_grounding=_score(grounding),
+        boundary_compliance=_score(boundary),
+    )
 
 
 def _result(
@@ -79,7 +87,7 @@ def test_judge_case_uses_zero_temperature_and_versioned_prompt():
         captured["messages"] = messages
         captured["response_model"] = response_model
         captured.update(kwargs)
-        return _result(), object()
+        return _llm_result(), object()
 
     result, _ = judge_case(
         {"conversation": [], "final_result": {}},
@@ -87,6 +95,7 @@ def test_judge_case_uses_zero_temperature_and_versioned_prompt():
     )
 
     assert result.followup_relevance.score == 5
+    assert captured["response_model"] is JudgeLLMResult
     assert captured["temperature"] == 0.0
     assert captured["prompt_name"] == "judge.case"
     assert captured["prompt_version"] == PROMPT_VERSION
@@ -101,13 +110,36 @@ def test_judge_case_uses_independent_model_and_prices(monkeypatch):
 
     def fake_llm(messages, response_model, **kwargs):
         captured.update(kwargs)
-        return _result(), object()
+        return _llm_result(), object()
 
     judge_case({"conversation": [], "final_result": {}}, judge_llm=fake_llm)
 
     assert captured["model"] == "qwen-max"
     assert captured["price_input_per_1k"] == 0.0024
     assert captured["price_output_per_1k"] == 0.0096
+
+
+def test_judge_case_computes_followup_without_the_model():
+    values = {
+        "conversation": [
+            {"role": "user", "text": "肚子疼"},
+            {"role": "agent", "text": "请问主要的不适是什么？"},
+        ],
+        "final_result": {},
+    }
+
+    result, _ = judge_case(
+        values,
+        judge_llm=lambda *args, **kwargs: (_llm_result(), object()),
+    )
+
+    assert result.followup_relevance.score == 3
+
+
+def test_dimension_score_defaults_missing_evidence():
+    score = DimensionScore(score=4, reason="r")
+
+    assert score.evidence == "无"
 
 
 def test_read_text_accepts_gb18030(tmp_path):

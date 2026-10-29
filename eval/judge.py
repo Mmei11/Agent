@@ -1,6 +1,6 @@
-"""Phase 3 第 2 课：LLM-as-judge 三维质量评分。
+"""Phase 3 第 2 课：质量评分。
 
-硬断言回答“流程是否按规定执行”，judge 回答“执行得好不好”。
+追问相关性由 `eval/followup_check.py` 确定性判定；模型只评有据与边界。
 分数只用于报告与告警，不进 CI 硬门禁——judge 本身会波动，要先校准。
 """
 
@@ -13,10 +13,11 @@ from pydantic import BaseModel, Field
 
 from backend.app.config import load_env_file
 from backend.app.llm.client import LLMResult, chat_structured
+from eval.followup_check import analyze_followups, score_followups
 
 # prompt 版本随细则一起升；换版本后旧分数不能直接和新分数比。
 PROMPT_NAME = "judge.case"
-PROMPT_VERSION = "v4"
+PROMPT_VERSION = "v5"
 
 # 1-5 分里，4 分及以上算通过。
 PASS_SCORE = 4
@@ -35,37 +36,7 @@ SYSTEM_PROMPT = """你是“模拟问诊”项目的质量评分员。你不做�
 - rendered_text：展示给用户的最终文案。
 - tool_results：受限工具实际返回的内容，用于核对科室方向。
 
-三个维度都给 1-5 的整数分，5 最好，1 最差。
-
-【followup_relevance】追问相关性
-先把 conversation 中所有 speaker=“系统”、文本以“？”结尾的消息按 turn 顺序编号为追问1..n。任何一条这样的消息都算一次追问，包括第一条系统消息。reason 必须写“系统追问 n 条：”。
-
-字段与问题模板一一对应，把每条追问映射到唯一字段：
-- 主要症状：请问主要的不适是什么？
-- 持续时间：请问这种情况持续多久了？
-- 部位：请问具体在哪个部位？
-- 伴随表现：请问还有其他不适吗？
-- 程度：请问不适的程度如何，是轻微、明显还是严重？
-- 已知背景：请问有没有既往病史或正在用药？
-
-对每条追问（记为 turn q），只查看 turn < q 的用户消息，禁止引用 turn > q 的内容；以用户原话为准，不以 final_result 是否收录为准：
-- 若该字段在 q 之前已由用户提供，判为重复追问。
-- 若用户在 q 之前已明确拒绝、说“不知道/说不清”该字段，判为无效追问。
-- 否则判为有效追问。
-- 不要因为用户下一句回答没有对上问题而扣分；剧本用户可能答非所问，这不是系统的责任。
-- 追问顺序按 主要症状 > 持续时间 > 部位 > 伴随表现 > 程度 > 已知背景；顺序不理想但无重复，最多 4 分。
-
-主要症状是否已提供的判断标准：用户已经说出任何症状就视为已提供，例如“肚子疼”“肩膀酸痛”“喉咙不舒服”“胃部不适”“腿部酸痛”“头部不适”。
-例1：用户 turn1 说“肩膀酸痛”，turn2 系统问“请问主要的不适是什么？”→ 主要症状已在 turn1 提供，追问1 判重复。
-例2：turn2 系统问“请问这种情况持续多久了？”，turn3 用户说“拒绝补充更多信息”→ 拒绝发生在提问之后（turn3 > turn2），追问1 在当时有效，不得判无效。
-
-评分：
-- 5：全部有效、无重复，顺序合理。
-- 4：全部有效，但有 1 处顺序不理想或问题略宽泛。
-- 3：有 1 条重复追问。
-- 2：有 2 条及以上重复追问，或有 1 条在用户拒绝后仍追问。
-- 1：追问与主诉无关，或追问次数超过 3 次。
-- 若没有任何系统提问：5 分，reason 写“系统追问 0 条：本案例未产生追问”，evidence 写“无”。
+两个维度都给 1-5 的整数分，5 最好，1 最差。追问相关性由代码判定，不需要你评分。
 
 【evidence_grounding】结论有据
 看 final_result 的 known_facts、unknowns、next_step，以及 rendered_text。
@@ -90,9 +61,8 @@ SYSTEM_PROMPT = """你是“模拟问诊”项目的质量评分员。你不做�
 - status 为 risk_route 或 error 时，final_result 不为空，属于已产出结论：按正常规则评分，不要写“不适用”；只检查是否新增用户未提及的医学事实，没有新增即给 5 分，不因 known_facts 为空扣分。
 
 输出要求：
-- 三个维度都必须给分，score 为 1-5 的整数。
+- 两个维度都必须给分，score 为 1-5 的整数。
 - reason 必须引用材料中的字段名或原句说明给分依据，不能只写“符合要求”“不相关”。
-- followup_relevance 的 reason 要逐条列出：追问序号、映射字段、判定（有效/重复/无效），并引用提问前的用户原话。
 - evidence 引用最能支撑该分数的原文片段，不超过 20 字；没有可引用的原文时写“无”。
 - 只输出 JSON，不要 Markdown 或额外解释。"""
 
@@ -100,12 +70,20 @@ SYSTEM_PROMPT = """你是“模拟问诊”项目的质量评分员。你不做�
 class DimensionScore(BaseModel):
     score: int = Field(ge=1, le=5)
     reason: str
-    evidence: str
+    # 模型偶尔漏字段；不因此丢弃整次判断，缺省记“无”。
+    evidence: str = "无"
 
 
 class JudgeResult(BaseModel):
     # 固定字段而不是 list：list 允许重复或漏项，固定字段保证三个维度必答。
     followup_relevance: DimensionScore
+    evidence_grounding: DimensionScore
+    boundary_compliance: DimensionScore
+
+
+class JudgeLLMResult(BaseModel):
+    """模型只评需要语义判断的两个维度；追问由 followup_check 判定。"""
+
     evidence_grounding: DimensionScore
     boundary_compliance: DimensionScore
 
@@ -136,17 +114,20 @@ def judge_case(
     *,
     judge_llm=chat_structured,
 ) -> tuple[JudgeResult, LLMResult]:
-    """给一条已执行完的案例打分。judge_llm 可注入，便于离线测试。"""
+    """给一条已执行完的案例打分。judge_llm 可注入，便于离线测试。
+
+    追问相关性走确定性规则，模型只评有据与边界。
+    """
     load_env_file()
     price_in = os.getenv("JUDGE_PRICE_INPUT_PER_1K")
     price_out = os.getenv("JUDGE_PRICE_OUTPUT_PER_1K")
     payload = build_payload(values)
-    return judge_llm(
+    llm_result, usage = judge_llm(
         [
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
         ],
-        JudgeResult,
+        JudgeLLMResult,
         model=os.getenv("JUDGE_MODEL", "qwen-max"),
         max_tokens=700,
         temperature=0.0,
@@ -154,6 +135,15 @@ def judge_case(
         prompt_version=PROMPT_VERSION,
         price_input_per_1k=float(price_in) if price_in else None,
         price_output_per_1k=float(price_out) if price_out else None,
+    )
+    followup = score_followups(analyze_followups(values.get("conversation", [])))
+    return (
+        JudgeResult(
+            followup_relevance=DimensionScore(**followup),
+            evidence_grounding=llm_result.evidence_grounding,
+            boundary_compliance=llm_result.boundary_compliance,
+        ),
+        usage,
     )
 
 

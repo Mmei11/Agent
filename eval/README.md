@@ -104,3 +104,28 @@ Model mode is not deterministic, so a passing run is not evidence that the same
 cases will pass next time. Record the model name and run date with the results.
 Risk, vague, and invalid cases short-circuit before the decision node, so they
 consume no tokens.
+
+## Judge 与多次采样（Phase 3 第 3–4 课）
+
+judge 走独立模型（`.env` 的 `JUDGE_MODEL`，默认 qwen-max）和独立单价。judge 分数只用于报告与告警，不进 CI 硬门禁。
+
+追问相关性由 `eval/followup_check.py` 确定性判定：六个问题模板映射字段，只扫描提问 turn 之前的用户原话，识别否定与字段级拒绝。judge 只评“结论有据”和“边界合规”两个需要语义判断的维度。
+
+人工校准：导出盲标模板 → 人工填 `labels.csv` → 计算一致率与 Cohen's κ。
+
+```sh
+uv run python -m eval.calibrate_judge export --dir eval/results/calibration-v4
+uv run python -m eval.calibrate_judge score --dir eval/results/calibration-v4
+```
+
+盲标阶段不要打开同目录的 `judge.jsonl`；rubric 改动后开新目录，不复用旧标签。
+
+多次采样：同一条案例跑 n 次，报 `pass^n`、单次通过率、judge 均值与标准差。
+
+```sh
+uv run python -m eval.repeat --n 5 --split dev
+uv run python -m eval.repeat --n 5 --case E009,E015,E017,E018,E020 \
+    --judge-cases E009,E015,E017,E018,E020
+```
+
+`--judge-cases` 会为每次运行调用 judge，产生模型费用；默认不调用。mock 是确定性的，`pass^n=1.0` 只说明评测器没有隐藏随机性，不代表模型模式的稳定性。`eval/results/` 已在 `.gitignore` 中。

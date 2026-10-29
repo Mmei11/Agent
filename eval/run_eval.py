@@ -66,7 +66,13 @@ def state_for(session_id: str) -> dict[str, Any]:
     return dict(snapshot.values or {})
 
 
-def check_case(case: dict[str, Any], client: TestClient, db_path: Path) -> dict[str, Any]:
+def check_case(
+    case: dict[str, Any],
+    client: TestClient,
+    db_path: Path,
+    *,
+    with_state: bool = False,
+) -> dict[str, Any]:
     # 取案例 ID，例如 E001。
     case_id = case["id"]
     # 取案例分类，决定采用哪组断言。
@@ -247,7 +253,7 @@ def check_case(case: dict[str, Any], client: TestClient, db_path: Path) -> dict[
     failures = run_hard_assertions(case, observation)
 
     # 返回这条案例的所有重要信息，供 JSONL 和 Markdown 报告使用。
-    return {
+    row = {
         # 案例唯一编号。
         "case_id": case_id,
         # 分层：dev 用于日常调试，holdout 只在发版前跑。
@@ -296,6 +302,10 @@ def check_case(case: dict[str, Any], client: TestClient, db_path: Path) -> dict[
         # 响应正文只保留前 300 个字符，避免报告过长。
         "response_excerpt": response_text[:300],
     }
+    # 重复采样需要把完整状态交给 judge；默认不返回，避免结果文件膨胀。
+    if with_state:
+        row["_state"] = values
+    return row
 
 
 def run(
