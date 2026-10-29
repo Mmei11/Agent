@@ -2,11 +2,16 @@ name: Nightly model quality
 
 on:
   schedule:
-    - cron: "17 3 * * *"
+    # GitHub cron 是 UTC；19:17 UTC = 北京时间次日 03:17
+    - cron: "17 19 * * *"
   workflow_dispatch:
 
 permissions:
   contents: read
+
+concurrency:
+  group: nightly-model-quality
+  cancel-in-progress: false
 
 jobs:
   model-quality:
@@ -38,7 +43,11 @@ jobs:
         run: uv sync --locked
 
       - name: Require API key
-        run: test -n "$DASHSCOPE_API_KEY"
+        run: |
+          if [ -z "$DASHSCOPE_API_KEY" ]; then
+            echo "::error::缺少 DASHSCOPE_API_KEY secret；请在 Settings → Secrets and variables → Actions 添加。"
+            exit 1
+          fi
 
       - name: Model-mode hard assertions (dev)
         run: uv run python -m eval.run_eval --use-model --split dev

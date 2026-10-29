@@ -160,7 +160,15 @@ uv run python -m eval.risk_probe
 - `eval.self_check` 与 `eval.ci_break_check`（故意破坏规则必须变红）
 - 独立 job 构建 Docker 镜像
 
-holdout 不进入 PR。模型评测、holdout 红队和 judge `n=5` 放在 `.github/workflows/nightly.yml`，需要仓库 secret `DASHSCOPE_API_KEY`。本地复现：
+holdout 不进入 PR。模型评测、holdout 红队和 judge `n=5` 放在 `.github/workflows/nightly.yml`，需要仓库 secret `DASHSCOPE_API_KEY`。
+
+nightly 首次使用：
+
+1. GitHub → Settings → Secrets and variables → Actions → New repository secret，名称 `DASHSCOPE_API_KEY`；
+2. Actions → `Nightly model quality` → Run workflow，手动跑一次确认链路；
+3. 定时是 UTC：`17 19 * * *` 对应北京时间次日 03:17。
+
+单次模型评测约 ¥0.2，耗时 10–15 分钟。本地复现：
 
 ```sh
 uv run python -m pytest -q
