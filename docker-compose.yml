@@ -1,14 +1,40 @@
 services:
+  knowledge-db:
+    # PostgreSQL 16 + pgvector。与应用栈放在同一个 compose 里，
+    # 一条 docker compose down 就能全部停掉，不会留下网络占用。
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: knowledge
+    ports:
+      # 宿主机 15433，避开本机 5432 与 Langfuse 的 15432。
+      # 绑定 127.0.0.1：本机 localhost 会走 IPv6，映射连不上。
+      - "127.0.0.1:15433:5432"
+    volumes:
+      - knowledge_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d knowledge"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
   backend:
     build:
       context: .
       dockerfile: Dockerfile
+    depends_on:
+      knowledge-db:
+        condition: service_healthy
     environment:
       CONSULTATION_DB_PATH: /data/consultations.sqlite
       USE_MODEL: ${USE_MODEL:-0}
       DASHSCOPE_API_KEY: ${DASHSCOPE_API_KEY:-}
       DASHSCOPE_MODEL: ${DASHSCOPE_MODEL:-qwen-plus}
       DASHSCOPE_BASE_URL: ${DASHSCOPE_BASE_URL:-https://dashscope.aliyuncs.com/compatible-mode/v1}
+      # 容器内按服务名解析；本机直接跑 uvicorn 时用默认的 127.0.0.1:15433。
+      KNOWLEDGE_DB_URL: postgresql://postgres:postgres@knowledge-db:5432/knowledge
     volumes:
       - consultations_data:/data
     healthcheck:
@@ -36,3 +62,4 @@ services:
 
 volumes:
   consultations_data:
+  knowledge_pg_data:

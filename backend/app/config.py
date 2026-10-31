@@ -19,6 +19,14 @@ ALLOWED_NAMES = {
     "JUDGE_MODEL",
     "JUDGE_PRICE_INPUT_PER_1K",
     "JUDGE_PRICE_OUTPUT_PER_1K",
+    # 向量化（Phase 4）：与 chat 共用 DASHSCOPE_API_KEY / BASE_URL。
+    "EMBEDDING_PROVIDER",
+    "DASHSCOPE_EMBEDDING_MODEL",
+    "EMBEDDING_DIMENSION",
+    "EMBEDDING_BATCH_SIZE",
+    "EMBEDDING_PRICE_PER_1K",
+    # 知识库向量存储（Phase 4）。留空则用 docker-compose.knowledge.yml 的默认地址。
+    "KNOWLEDGE_DB_URL",
     # 运行开关
     "USE_MODEL",
     "CONSULTATION_DB_PATH",
