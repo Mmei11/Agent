@@ -11,11 +11,15 @@ from backend.app.knowledge.keywords import extract_keywords, keyword_score
 from backend.app.llm.embeddings import embed_texts
 
 DEFAULT_TOP_K = 5
-DEFAULT_THRESHOLD = 0.35
+# 按 text-embedding-v3 实测分布定的，不是照搬别的项目：
+# 相关问句 top-1 落在 0.635–0.851，闲聊问句落在 0.370–0.482。
+# 取 0.6 而不是取中间的 0.55："说不上来哪里不舒服"这类含糊说法能到 0.569，
+# 按"宁可说暂无依据"的原则应该给出 None。样本少，D4 拿到标注集后要重定。
+DEFAULT_THRESHOLD = 0.6
 DEFAULT_LAMBDA = 0.1
 CANDIDATE_MULTIPLIER = 3
 
-_COLUMNS = "id, title, content, source_id, scope_text, version"
+_COLUMNS = "id, title, content, source_id, department, scope_text, version"
 
 
 @dataclass(frozen=True)
@@ -26,6 +30,7 @@ class Hit:
     title: str
     content: str
     source_id: str
+    department: str | None
     scope_text: str
     version: str
     similarity: float
@@ -138,6 +143,7 @@ def fuse(
             title=row["title"],
             content=row["content"],
             source_id=row["source_id"],
+            department=row.get("department"),
             scope_text=row["scope_text"],
             version=row["version"],
             similarity=row["similarity"],

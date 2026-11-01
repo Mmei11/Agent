@@ -61,6 +61,8 @@ class KnowledgeEntry(BaseModel):
     content: str = Field(min_length=1)
     # 指向 sources.json 里的 id，不直接写文件名
     source_id: str = Field(min_length=1)
+    # 科室方向。只有 category=department_route 的条目才填，由 validate_store 强制
+    department: str | None = None
     scope_payload: ScopePayload  # 机器可过滤的适用范围
     scope_text: str = Field(min_length=1)  # 人读的适用边界
     version: str = Field(pattern=r"^v\d+$")  # 知识版本，如 v1、v2
@@ -121,6 +123,10 @@ def validate_store(
         # 悬空引用：条目指向的出处不存在，检索时就拿不到 source
         if entry.source_id not in sources:
             problems.append(f"{entry.id} 引用了不存在的出处：{entry.source_id}")
+
+        # 分诊条目必须给出科室，否则 tool 只能返回一段没有落点的文字
+        if entry.category == "department_route" and not entry.department:
+            problems.append(f"{entry.id} 是分诊条目但缺少 department")
 
         # 没有症状簇就既过滤不了、也做不了关键词匹配
         if not entry.scope_payload.symptom_cluster:

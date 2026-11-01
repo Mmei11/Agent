@@ -13,6 +13,7 @@ from backend.app.knowledge import db
 from backend.app.knowledge.indexer import build_index
 from backend.app.knowledge.keywords import extract_keywords, keyword_score
 from backend.app.knowledge.retrieval import _filter_sql, fuse, retrieve
+from backend.app.knowledge.schema import load_entries
 
 # ---------- 关键词提取 ----------
 
@@ -179,21 +180,21 @@ def conn(monkeypatch):
 @pytest.fixture
 def indexed(conn):
     summary = build_index(conn=conn, client=_FakeClient())
-    assert summary["count"] == 13
+    assert summary["count"] == len(load_entries())
     return conn
 
 
 def test_index_writes_every_entry(indexed):
     with indexed.cursor() as cur:
         cur.execute(f"SELECT count(*) FROM {db.table_name()}")
-        assert cur.fetchone()[0] == 13
+        assert cur.fetchone()[0] == len(load_entries())
 
 
 def test_index_is_idempotent(indexed):
     build_index(conn=indexed, client=_FakeClient())
     with indexed.cursor() as cur:
         cur.execute(f"SELECT count(*) FROM {db.table_name()}")
-        assert cur.fetchone()[0] == 13
+        assert cur.fetchone()[0] == len(load_entries())
 
 
 def test_keyword_path_rescues_exact_term(indexed):

@@ -22,6 +22,7 @@ CREATE TABLE IF NOT EXISTS {table} (
     title         text NOT NULL,
     content       text NOT NULL,
     source_id     text NOT NULL,
+    department    text,
     scope_payload jsonb NOT NULL,
     scope_text    text NOT NULL,
     version       text NOT NULL,
@@ -62,6 +63,10 @@ def ensure_schema(conn, dimension: int) -> str:
     with conn.cursor() as cur:
         cur.execute("CREATE EXTENSION IF NOT EXISTS vector")
         cur.execute(CREATE_TABLE_SQL.format(table=table, dimension=dimension))
+        # 老表不会因为 IF NOT EXISTS 自动补列，这里显式补一次
+        cur.execute(
+            f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS department text"
+        )
         # 表已存在时 CREATE TABLE IF NOT EXISTS 不会改列宽。维度变了却继续入库，
         # 错误会拖到插入时才爆，而且信息更难读，所以这里先挡一次。
         cur.execute(

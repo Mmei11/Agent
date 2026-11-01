@@ -1,5 +1,8 @@
 """Day 9：受限工具实现。工具只负责按约束执行，不做决策。案例均为虚构。"""
 
+from backend.app.tools.contract import ToolResult
+from backend.app.tools.knowledge_tools import KNOWLEDGE_TOOL_SPECS
+
 # 症状关键词 → 科室方向的受限映射
 SYMPTOM_DEPARTMENT_MAP = {
     "头部不适": "神经内科",
@@ -54,3 +57,16 @@ TOOL_REGISTRY = {
     "department_suggest": department_suggest,
     "visit_preparation": visit_preparation,
 }
+
+# Phase 4：契约化注册表。上面那份留给现有 graph 用，D4 再把节点切过来。
+TOOL_SPECS = {spec.name: spec for spec in KNOWLEDGE_TOOL_SPECS.values()}
+
+
+def call_tool(name: str, params: dict) -> ToolResult:
+    """按契约调用工具。未注册的名字也返回结构化失败，不抛异常。"""
+    spec = TOOL_SPECS.get(name)
+    if spec is None:
+        return ToolResult(
+            ok=False, name=name, error=f"未注册的工具：{name}", error_kind="invalid_params"
+        )
+    return spec.call(params)

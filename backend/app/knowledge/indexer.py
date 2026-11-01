@@ -11,13 +11,14 @@ from backend.app.llm.embeddings import embed_texts
 
 UPSERT_SQL = """
 INSERT INTO {table}
-    (id, category, title, content, source_id, scope_payload, scope_text, version, embedding)
-VALUES (%s, %s, %s, %s, %s, %s::jsonb, %s, %s, %s::vector)
+    (id, category, title, content, source_id, department, scope_payload, scope_text, version, embedding)
+VALUES (%s, %s, %s, %s, %s, %s, %s::jsonb, %s, %s, %s::vector)
 ON CONFLICT (id) DO UPDATE SET
     category      = EXCLUDED.category,
     title         = EXCLUDED.title,
     content       = EXCLUDED.content,
     source_id     = EXCLUDED.source_id,
+    department    = EXCLUDED.department,
     scope_payload = EXCLUDED.scope_payload,
     scope_text    = EXCLUDED.scope_text,
     version       = EXCLUDED.version,
@@ -53,6 +54,7 @@ def build_index(
             entry.title,
             entry.content,
             entry.source_id,
+            entry.department,
             json.dumps(entry.scope_payload.model_dump(), ensure_ascii=False),
             entry.scope_text,
             entry.version,

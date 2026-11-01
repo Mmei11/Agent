@@ -30,10 +30,25 @@ def test_store_loads_without_problems():
     assert validate_store() == []
 
 
-def test_first_batch_is_department_routing():
+def test_entries_cover_three_categories():
     entries = load_entries()
-    assert len(entries) >= 12
-    assert {entry.category for entry in entries} == {"department_route"}
+    assert {entry.category for entry in entries} == {
+        "department_route",
+        "red_flag",
+        "visit_prep",
+    }
+
+
+def test_department_entries_all_carry_a_department():
+    for entry in load_entries():
+        if entry.category == "department_route":
+            assert entry.department, entry.id
+
+
+def test_red_flags_are_all_high_risk():
+    for entry in load_entries():
+        if entry.category == "red_flag":
+            assert entry.scope_payload.risk_level == "high", entry.id
 
 
 def test_every_entry_carries_scope_and_version():
