@@ -27,6 +27,23 @@ jobs:
       JUDGE_PRICE_INPUT_PER_1K: "0.0024"
       JUDGE_PRICE_OUTPUT_PER_1K: "0.0096"
       TRACE_SINK: none
+      # 夜间跑真实检索：连下面 services 里的 pgvector，而不是 stub。
+      KNOWLEDGE_DB_URL: postgresql://postgres:postgres@127.0.0.1:5433/knowledge
+    services:
+      # recall 评测必须连真库：stub 只跑流程，量不出检索质量。
+      pgvector:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: knowledge
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d knowledge"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     steps:
       - uses: actions/checkout@v7
 
@@ -48,6 +65,12 @@ jobs:
             echo "::error::缺少 DASHSCOPE_API_KEY secret；请在 Settings → Secrets and variables → Actions 添加。"
             exit 1
           fi
+
+      - name: Build knowledge index
+        run: uv run python -m backend.app.knowledge
+
+      - name: Retrieval recall@5
+        run: uv run python -m eval.recall_eval
 
       - name: Model-mode hard assertions (dev)
         run: uv run python -m eval.run_eval --use-model --split dev

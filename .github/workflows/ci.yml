@@ -19,6 +19,8 @@ jobs:
     timeout-minutes: 10
     env:
       USE_MODEL: "0"
+      # CI 没有向量库，知识工具用确定性替身跑流程；检索质量由本地评测负责
+      KNOWLEDGE_BACKEND: "stub"
     steps:
       - uses: actions/checkout@v7
 

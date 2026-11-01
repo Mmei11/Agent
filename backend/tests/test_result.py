@@ -14,12 +14,12 @@ def test_completed_result_has_all_fields():
     result = build_completed_result(
         {"主要症状": ["头部不适"]},
         ["持续时间"],
-        {"department_suggest": {"department": "神经内科"}},
+        {"department_route": {"department": "神经内科"}},
     )
     assert result["status"] == "completed"
     assert result["known_facts"] == {"主要症状": ["头部不适"]}
     assert result["unknowns"] == ["持续时间"]
-    assert result["tools_used"] == ["department_suggest"]
+    assert result["tools_used"] == ["department_route"]
     assert "神经内科" in result["next_step"]
     assert result["risk_message"] is None
     assert "不提供确诊" in result["limitations"]
@@ -30,7 +30,7 @@ def test_completed_result_no_match():
     result = build_completed_result(
         {"主要症状": ["未知症状"]},
         [],
-        {"department_suggest": {"department": None, "reason": "暂无法判断"}},
+        {"department_route": {"department": None, "reason": "暂无法判断"}},
     )
     assert "暂无法判断" in result["next_step"]
 
@@ -62,7 +62,7 @@ def test_render_completed_text():
     result = build_completed_result(
         {"主要症状": ["头部不适"]},
         ["持续时间"],
-        {"department_suggest": {"department": "神经内科"}},
+        {"department_route": {"department": "神经内科"}},
     )
     text = render_text(result)
     assert "已知信息" in text

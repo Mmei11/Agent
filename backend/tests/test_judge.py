@@ -45,7 +45,7 @@ def test_build_payload_labels_speakers_and_drops_expected_answers():
         ],
         "final_result": {"status": "completed"},
         "rendered_text": "建议就诊方向：神经内科",
-        "tool_results": {"department_suggest": {"department": "神经内科"}},
+        "tool_results": {"department_route": {"department": "神经内科"}},
         "expected_actions": ["ASK_FOLLOWUP"],
         "prohibited_behaviors": ["确诊"],
     }

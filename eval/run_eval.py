@@ -34,7 +34,9 @@ from backend.app.api import routes
 # FastAPI 应用对象。
 from backend.app.api.routes import app
 # 工具函数注册表，故障测试会临时替换其中的工具。
-from backend.app.tools.registry import TOOL_REGISTRY
+from backend.app.tools.contract import ToolResult
+
+import backend.app.agent.graph as graph_module
 # 声明式硬断言：每条案例自己声明要检查什么。
 from eval.assertions import CaseObservation, run_hard_assertions
 
@@ -77,15 +79,15 @@ def check_case(
     case_id = case["id"]
     # 取案例分类，决定采用哪组断言。
     category = case["category"]
-    # 备份真实工具，后面可能临时替换，结束时需要还原。
-    original_tool = TOOL_REGISTRY["department_suggest"]
+    # 备份真实工具入口，后面可能临时替换，结束时需要还原。
+    original_tool = graph_module.call_tool
     # 记录注入故障类型；普通案例没有故障，所以初始为 None。
     injected: str | None = None
     # 复制原始输入轮次，后面对故障案例会改成工具可达的输入。
     input_turns = list(case["input_turns"])
 
     # 故障案例需要经过真实 graph 到达工具节点，所以改用信息完整的虚构输入，
-    # 然后在工具注册表这一边界注入故障行为。
+    # 然后在工具入口这一边界注入故障行为。
     if category == "tool_failure":
         # 让决策器不必先追问，直接到工具节点。
         input_turns = [TOOL_FIXTURE]
@@ -94,21 +96,18 @@ def check_case(
             # 标记注入的是空结果。
             injected = "empty_result"
             # 临时替换工具：明确返回 department=None，而不编造科室。
-            TOOL_REGISTRY["department_suggest"] = lambda facts: {
-                "department": None,
-                "reason": "injected_empty_result",
-            }
+            graph_module.call_tool = lambda name, params: ToolResult(
+                ok=True,
+                name=name,
+                data={"department": None, "reason": "injected_empty_result", "hits": []},
+            )
         else:
             # E031 注入超时错误。
             injected = "timeout"
-
-            # 定义会模拟超时的工具实现。
-            def timeout_tool(facts: dict) -> dict:
-                # 工具运行时抛出异常，模拟实际调用超时。
-                raise TimeoutError("injected department_suggest timeout")
-
-            # 将注册表里的工具临时换成超时实现。
-            TOOL_REGISTRY["department_suggest"] = timeout_tool
+            # 直接返回超时回执，等价于契约层判定超时。
+            graph_module.call_tool = lambda name, params: ToolResult(
+                ok=False, name=name, error="执行超过 8.0s", error_kind="timeout"
+            )
 
     # 为本案例初始化 API 和专属数据库。
     reset_api(db_path)
@@ -188,8 +187,8 @@ def check_case(
                     # 新会话都创建失败，则隔离检查也算未通过。
                     cross_session_clean = False
     finally:
-        # 恢复真实的 department_suggest，避免注入影响后续案例或程序。
-        TOOL_REGISTRY["department_suggest"] = original_tool
+        # 恢复真实的工具入口，避免注入影响后续案例或程序。
+        graph_module.call_tool = original_tool
 
     # 计算本案例的总耗时。
     elapsed = time.perf_counter() - started

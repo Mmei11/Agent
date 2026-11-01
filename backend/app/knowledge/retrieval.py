@@ -98,7 +98,11 @@ def keyword_search(
         return []
 
     where, filter_params = _filter_sql(category, risk_level)
-    like_clause = " OR ".join(["content ILIKE %s"] * len(keywords))
+    # 正文和 symptom_cluster 一起匹配：后者是条目的同义词表，
+    # 用户说"挂号"、正文写"就诊前准备"时，靠它才捞得到。
+    like_clause = " OR ".join(
+        ["content ILIKE %s OR scope_payload->>'symptom_cluster' ILIKE %s"] * len(keywords)
+    )
     sql = f"""
         SELECT {_COLUMNS}, 1 - (embedding <=> %s::vector) AS similarity
         FROM {table_name()}
@@ -107,7 +111,10 @@ def keyword_search(
         ORDER BY similarity DESC
         LIMIT %s
     """
-    params = [vector_literal, *[f"%{keyword}%" for keyword in keywords], *filter_params, limit]
+    like_params: list[str] = []
+    for keyword in keywords:
+        like_params.extend([f"%{keyword}%", f"%{keyword}%"])
+    params = [vector_literal, *like_params, *filter_params, limit]
     with conn.cursor() as cur:
         cur.execute(sql, params)
         names = [description.name for description in cur.description]

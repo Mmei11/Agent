@@ -1,5 +1,7 @@
 """Day 5-10：问诊 Agent 状态图。决策器支持模型和预设两种模式。案例均为虚构。"""
 
+import os
+
 from langgraph.graph import END, START, StateGraph  # LangGraph 图的组件
 
 # 从 decision.py 导入决策相关函数
@@ -20,7 +22,16 @@ from backend.app.agent.result import (
 from backend.app.agent.state import ConsultationState  # 状态类型
 from backend.app.observability import current_trace, traced_node
 from backend.app.safety.rule_engine import final_check, screen  # 风险检查和最终输出检查
-from backend.app.tools.registry import TOOL_REGISTRY  # 工具注册表
+from backend.app.tools.knowledge_tools import DEPARTMENT_ROUTE
+from backend.app.tools.registry import call_tool as _live_call_tool
+from backend.app.tools.registry import stub_call_tool
+
+# CI 与门禁自检没有向量库，用确定性替身跑通流程；本地与生产默认走真实检索。
+call_tool = (
+    stub_call_tool
+    if os.getenv("KNOWLEDGE_BACKEND", "pgvector") == "stub"
+    else _live_call_tool
+)
 
 MAX_FOLLOWUPS = 3  # 普通追问上限，spec 要求的工程边界
 
@@ -98,21 +109,44 @@ def route_after_decision(state: ConsultationState) -> str:
     return "output"
 
 
-def tool(state: ConsultationState) -> dict:
-    """工具节点：从注册表调用受限工具，把结构化结果写回 state。
+KNOWLEDGE_TOOL_NAME = DEPARTMENT_ROUTE  # 目前唯一接进图的知识工具
 
-    Day 9：mock 决策器只调 department_suggest。
-    Day 10 起模型可选择调用哪个工具。
+
+def _query_from_facts(collected_facts: dict) -> str:
+    """把已收集的字段拼成一句检索问句。没有事实时返回空串，由调用方处理。"""
+    parts: list[str] = []
+    for values in collected_facts.values():
+        if isinstance(values, list):
+            parts.extend(str(value) for value in values if value)
+        elif values:
+            parts.append(str(values))
+    return " ".join(parts).strip()
+
+
+def tool(state: ConsultationState) -> dict:
+    """工具节点：按契约调用知识工具，把结构化结果写回 state。
+
+    Day 9 直接调注册表里的裸函数；Phase 4 起走 ToolSpec，参数校验、
+    超时和失败分类都由契约层保证。
     """
     results = dict(state.tool_results)  # 复制已有工具结果，不改原 state
-    tool_name = "department_suggest"  # 要调用的工具名（Day 10 起模型来选）
-    tool_fn = TOOL_REGISTRY[tool_name]  # 从注册表取出对应的函数
-    try:
-        result = tool_fn(state.collected_facts)  # 调用工具，传入已收集的字段
-    except Exception as exc:
-        # 工具异常写成结构化错误，不让异常直接变成 API 500。
-        error_message = f"{tool_name} 工具执行失败（{type(exc).__name__}）"
-        results[tool_name] = {"error": error_message}
+    tool_name = KNOWLEDGE_TOOL_NAME
+    trace_id = _trace_id()
+
+    query = _query_from_facts(state.collected_facts)
+    if not query:  # 没有任何事实可查，直接按"无依据"处理，不发请求
+        results[tool_name] = {"department": None, "reason": "no_input", "hits": []}
+        return {
+            "tool_results": results,
+            "trace": [
+                {"node": "tool", "called": tool_name, "ok": True, "trace_id": trace_id}
+            ],
+        }
+
+    outcome = call_tool(tool_name, {"query": query})
+    if not outcome.ok:
+        # 失败也写结构化结果：output 节点看到 error 就走错误分支。
+        results[tool_name] = {"error": outcome.error, "error_kind": outcome.error_kind}
         return {
             "tool_results": results,
             "trace": [
@@ -120,12 +154,13 @@ def tool(state: ConsultationState) -> dict:
                     "node": "tool",
                     "called": tool_name,
                     "ok": False,
-                    "error_type": type(exc).__name__,
-                    "trace_id": _trace_id(),
+                    "error_type": outcome.error_kind,
+                    "trace_id": trace_id,
                 }
             ],
         }
-    results[tool_name] = result  # 把结构化结果写回字典
+
+    results[tool_name] = outcome.data  # 把结构化结果写回字典
     return {
         "tool_results": results,
         # 工具返回值已经在 tool_results 里，这里只记调用名与成败。
@@ -134,7 +169,8 @@ def tool(state: ConsultationState) -> dict:
                 "node": "tool",
                 "called": tool_name,
                 "ok": True,
-                "trace_id": _trace_id(),
+                "latency_ms": outcome.latency_ms,
+                "trace_id": trace_id,
             }
         ],
     }

@@ -11,6 +11,11 @@ from backend.app.knowledge.retrieval import retrieve
 from backend.app.knowledge.schema import Source, load_sources
 from backend.app.tools.contract import ToolSpec
 
+# 工具名只在这里写一次，别的模块引用常量，避免字符串写错了才发现
+DEPARTMENT_ROUTE = "department_route"
+RED_FLAG_LOOKUP = "red_flag_lookup"
+GUIDELINE_RETRIEVE = "guideline_retrieve"
+
 
 class DepartmentRouteParams(BaseModel):
     query: str = Field(min_length=1, description="患者的症状或问题原话片段")

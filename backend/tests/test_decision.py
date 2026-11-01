@@ -56,7 +56,7 @@ def test_rule_finalizes_when_tool_done():
         missing_fields=["已知背景"],
         asked_questions=["请问有没有既往病史或正在用药？"],
         followup_count=1,
-        tool_results={"department_suggest": {"department": "神经内科"}},
+        tool_results={"department_route": {"department": "神经内科"}},
     )
     assert rule_action(state, max_followups=3) == "FINALIZE"
 
@@ -78,7 +78,7 @@ def test_validate_prevents_duplicate_tool_call():
         missing_fields=["已知背景"],
         asked_questions=["请问有没有既往病史或正在用药？"],
         followup_count=1,
-        tool_results={"department_suggest": {"department": "神经内科"}},
+        tool_results={"department_route": {"department": "神经内科"}},
     )
     final = validate_action("CALL_TOOL", state, max_followups=3)
     assert final == "FINALIZE"
@@ -122,7 +122,7 @@ def test_validate_allows_finalize_after_tool():
     state = ConsultationState(
         missing_fields=["持续时间"],
         followup_count=1,
-        tool_results={"department_suggest": {"department": "神经内科"}},
+        tool_results={"department_route": {"department": "神经内科"}},
     )
     final = validate_action("FINALIZE", state, max_followups=3)
     assert final == "FINALIZE"
@@ -164,7 +164,7 @@ def test_gate_keeps_rule_choice_without_confidence():
     state = ConsultationState(
         missing_fields=["持续时间"],
         followup_count=0,
-        tool_results={"department_suggest": {"department": "神经内科"}},
+        tool_results={"department_route": {"department": "神经内科"}},
     )
     action, downgraded = gate_by_confidence("FINALIZE", None, state, 3)
 

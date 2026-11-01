@@ -40,7 +40,7 @@ def rule_action(state: ConsultationState, max_followups: int) -> str:
     """确定性规则：没问够就问，没调工具就调，否则结束。"""
     under_limit = state.followup_count < max_followups
     can_ask = select_next_field(state.missing_fields, state.asked_questions) is not None
-    tool_called = "department_suggest" in state.tool_results
+    tool_called = "department_route" in state.tool_results
 
     if under_limit and can_ask:
         return "ASK_FOLLOWUP"
@@ -97,7 +97,7 @@ def validate_action(model_choice: str, state: ConsultationState, max_followups: 
     """
     under_limit = state.followup_count < max_followups  # 追问还没到上限
     can_ask = select_next_field(state.missing_fields, state.asked_questions) is not None  # 还有值得问的字段
-    tool_called = "department_suggest" in state.tool_results  # 工具已经调过了
+    tool_called = "department_route" in state.tool_results  # 工具已经调过了
 
     if model_choice == "ASK_FOLLOWUP":
         # 用户明确拒答时，尊重拒答并收束；工具尚未运行则继续做受限整理。

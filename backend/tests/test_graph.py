@@ -1,7 +1,26 @@
 """Day 5-12 流程测试：普通、风险、追问、否定、含糊、结构化结果。案例均为虚构。"""
 
+import pytest
+
+from backend.app.agent import graph as graph_module
 from backend.app.agent.graph import build_graph
 from backend.app.storage.saver import get_saver
+from backend.app.tools.contract import ToolResult
+
+
+@pytest.fixture(autouse=True)
+def fake_knowledge_tool(monkeypatch):
+    """图测试不依赖数据库与外部模型：知识工具固定返回神经内科。"""
+
+    def _call(name, params):
+        return ToolResult(
+            ok=True,
+            name=name,
+            data={"department": "神经内科", "reason": None, "hits": []},
+            latency_ms=1,
+        )
+
+    monkeypatch.setattr(graph_module, "call_tool", _call)
 
 
 def test_normal_path_calls_tool_then_finalizes():
@@ -12,10 +31,10 @@ def test_normal_path_calls_tool_then_finalizes():
     })
 
     assert result["risk_flags"] == []
-    assert result["tool_results"]["department_suggest"] == {"department": "神经内科"}
+    assert result["tool_results"]["department_route"]["department"] == "神经内科"
     final = result["final_result"]
     assert final["status"] == "completed"
-    assert final["tools_used"] == ["department_suggest"]
+    assert final["tools_used"] == ["department_route"]
     assert "神经内科" in final["next_step"]
 
     nodes = [entry["node"] for entry in result["trace"]]
@@ -35,7 +54,7 @@ def test_risk_path_bypasses_decision():
     result = app.invoke({"latest_user_message": "模拟人物突然呼吸困难"})
 
     assert result["risk_flags"] == ["R001"]
-    assert "department_suggest" not in result.get("tool_results", {})
+    assert "department_route" not in result.get("tool_results", {})
     final = result["final_result"]
     assert final["status"] == "risk_route"
     assert "R001" in final["risk_message"]
@@ -59,7 +78,7 @@ def test_followup_path_asks_then_tools(tmp_path):
         assert third["followup_count"] == 3
         assert third["final_result"] == {}
         result = app.invoke({"latest_user_message": "程度轻"}, config=config)
-        assert result["tool_results"]["department_suggest"] == {"department": "神经内科"}
+        assert result["tool_results"]["department_route"]["department"] == "神经内科"
         assert result["final_result"]["status"] == "completed"
 
 
@@ -72,7 +91,7 @@ def test_low_priority_field_only_one_followup(tmp_path):
         assert first["followup_count"] == 1
         assert first["final_result"] == {}
         result = app.invoke({"latest_user_message": "无病史"}, config=config)
-        assert result["tool_results"]["department_suggest"] == {"department": "神经内科"}
+        assert result["tool_results"]["department_route"]["department"] == "神经内科"
 
 
 def test_missing_fields_not_duplicated():

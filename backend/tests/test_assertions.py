@@ -15,12 +15,12 @@ def _observation(**overrides) -> CaseObservation:
         case={"id": "T001", "category": "normal", "input_turns": ["头部不适"]},
         response_status=200,
         nodes=["intake", "risk_check", "decision", "tool", "decision", "output"],
-        tool_calls=["department_suggest"],
+        tool_calls=["department_route"],
         result={
             "status": "completed",
             "known_facts": {},
             "unknowns": [],
-            "tools_used": ["department_suggest"],
+            "tools_used": ["department_route"],
             "next_step": "建议就医",
             "risk_message": None,
             "limitations": "",
@@ -29,7 +29,7 @@ def _observation(**overrides) -> CaseObservation:
             "followup_count": 0,
             "risk_flags": [],
             "asked_questions": [],
-            "tool_results": {"department_suggest": {"department": "神经内科"}},
+            "tool_results": {"department_route": {"department": "神经内科"}},
             "collected_facts": {"主要症状": ["头部不适"]},
         },
         trace=[{"node": "intake"}],
@@ -47,7 +47,7 @@ def test_normal_case_assertions_pass():
             {"type": "api_status", "expected": 200},
             {"type": "risk_flags", "mode": "empty"},
             {"type": "trace_count_max", "node": "followup", "max": 1},
-            {"type": "tool_calls_count", "tool": "department_suggest", "count": 1},
+            {"type": "tool_calls_count", "tool": "department_route", "count": 1},
         ]
     }
     assert run_hard_assertions(case, _observation()) == []
@@ -89,7 +89,7 @@ def test_tool_result_field_checks_value():
         "hard_assertions": [
             {
                 "type": "tool_result_field",
-                "tool": "department_suggest",
+                "tool": "department_route",
                 "field": "department",
                 "expected": None,
             }

@@ -22,6 +22,24 @@ def isolated_database(tmp_path, monkeypatch):
     routes._saver = None
 
 
+@pytest.fixture(autouse=True)
+def fake_knowledge_tool(monkeypatch):
+    """接口测试不依赖知识库与外部模型；需要别的行为时在用例里再覆盖。"""
+    from backend.app.agent import graph as graph_module
+    from backend.app.tools.contract import ToolResult
+
+    monkeypatch.setattr(
+        graph_module,
+        "call_tool",
+        lambda name, params: ToolResult(
+            ok=True,
+            name=name,
+            data={"department": "神经内科", "reason": None, "hits": []},
+            latency_ms=1,
+        ),
+    )
+
+
 def test_create_session_empty():
     """创建空会话：返回 session_id 和空状态。"""
     resp = client.post("/sessions", json={"initial_message": ""})
@@ -121,12 +139,16 @@ def test_declining_followup_finishes_without_another_question():
 
 
 def test_tool_timeout_returns_structured_error(monkeypatch):
-    from backend.app.tools import registry
+    from backend.app.agent import graph as graph_module
+    from backend.app.tools.contract import ToolResult
 
-    def timeout_tool(facts):
-        raise TimeoutError("simulated timeout")
-
-    monkeypatch.setitem(registry.TOOL_REGISTRY, "department_suggest", timeout_tool)
+    monkeypatch.setattr(
+        graph_module,
+        "call_tool",
+        lambda name, params: ToolResult(
+            ok=False, name=name, error="执行超过 5.0s", error_kind="timeout"
+        ),
+    )
     response = client.post(
         "/sessions",
         json={
@@ -137,8 +159,8 @@ def test_tool_timeout_returns_structured_error(monkeypatch):
     assert response.status_code == 200
     data = response.json()
     assert data["final_result"]["status"] == "error"
-    assert "工具执行失败" in data["final_result"]["next_step"]
-    assert "TimeoutError" in data["rendered_text"]
+    assert "执行超过" in data["final_result"]["next_step"]
+    assert "执行超过" in data["rendered_text"]
 
 
 def test_risk_session_is_terminal_and_new_case_is_independent():

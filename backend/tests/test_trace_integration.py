@@ -4,9 +4,26 @@ from types import SimpleNamespace
 
 import pytest
 
+from backend.app.agent import graph as graph_module
 from backend.app.agent.graph import build_graph
 from backend.app.llm.client import LLMError, chat
 from backend.app.observability import MemorySink, start_trace
+from backend.app.tools.contract import ToolResult
+
+
+@pytest.fixture(autouse=True)
+def fake_knowledge_tool(monkeypatch):
+    """图测试不依赖数据库与外部模型。"""
+    monkeypatch.setattr(
+        graph_module,
+        "call_tool",
+        lambda name, params: ToolResult(
+            ok=True,
+            name=name,
+            data={"department": "神经内科", "reason": None, "hits": []},
+            latency_ms=1,
+        ),
+    )
 
 
 def test_graph_nodes_emit_spans_and_link_trace_id():
@@ -62,7 +79,7 @@ def test_state_trace_keeps_only_summaries():
     assert "extracted" not in intake_entry
     assert "missing" not in intake_entry
     assert "result" not in tool_entry
-    assert tool_entry["called"] == "department_suggest"
+    assert tool_entry["called"] == "department_route"
     assert tool_entry["ok"] is True
 
 

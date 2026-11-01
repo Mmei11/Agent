@@ -70,3 +70,24 @@ def call_tool(name: str, params: dict) -> ToolResult:
             ok=False, name=name, error=f"未注册的工具：{name}", error_kind="invalid_params"
         )
     return spec.call(params)
+
+
+def stub_call_tool(name: str, params: dict) -> ToolResult:
+    """没有向量库时的确定性替身：复用旧的关键词映射保住流程。
+
+    只用于跑流程（CI、门禁自检），不代表真实检索质量——它不会返回 hits，
+    也没有出处。真实检索请用 call_tool。
+    """
+    query = str(params.get("query", ""))
+    for symptom, department in SYMPTOM_DEPARTMENT_MAP.items():
+        if symptom in query:
+            return ToolResult(
+                ok=True,
+                name=name,
+                data={"department": department, "reason": None, "hits": []},
+            )
+    return ToolResult(
+        ok=True,
+        name=name,
+        data={"department": None, "reason": "no_match", "hits": []},
+    )

@@ -15,7 +15,7 @@ class ConsultationResult(BaseModel):
     status: str  # completed / risk_route / error
     known_facts: dict = {}  # 已收集的字段，{"主要症状": ["头部不适"], ...}
     unknowns: list = []  # 仍不确定的字段名，["已知背景"]
-    tools_used: list = []  # 调过的工具名，["department_suggest"]
+    tools_used: list = []  # 调过的工具名，["department_route"]
     next_step: str = ""  # 下一步建议，如"建议就诊方向：神经内科"
     risk_message: str | None = None  # 风险提示，无则 None
     limitations: str = "本系统不提供确诊、处方或用药建议，请咨询专业人员。"  # 固定限制说明
@@ -31,7 +31,7 @@ def build_completed_result(collected_facts: dict, missing_fields: list, tool_res
     返回：结构化结果字典
     """
     tools_used = list(tool_results.keys())  # 取所有调过的工具名
-    dept_result = tool_results.get("department_suggest", {})  # 取科室建议结果，默认空字典
+    dept_result = tool_results.get("department_route", {})  # 取科室建议结果，默认空字典
     dept = dept_result.get("department")  # 从结果里取科室名
 
     if dept:  # 有匹配的科室

@@ -75,7 +75,7 @@ def test_context_carries_what_the_model_needs():
         collected_facts={"主要症状": ["胀痛"], "部位": ["前额"]},
         fact_evidence={"主要症状": ["一阵一阵胀痛"], "部位": ["前额"]},
         asked_questions=["请问主要的不适是什么？", "请问这种情况持续多久了？"],
-        tool_results={"department_suggest": {"department": "神经内科"}},
+        tool_results={"department_route": {"department": "神经内科"}},
         followup_count=2,
     )
 
@@ -85,7 +85,7 @@ def test_context_carries_what_the_model_needs():
     assert context["last_question"] == "请问这种情况持续多久了？"
     assert context["collected_facts"]["部位"] == ["前额"]
     assert context["fact_evidence"]["部位"] == ["前额"]
-    assert context["tool_results"]["department_suggest"]["department"] == "神经内科"
+    assert context["tool_results"]["department_route"]["department"] == "神经内科"
     assert context["followup_count"] == 2
     assert context["max_followups"] == 3
 
