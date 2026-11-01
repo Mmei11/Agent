@@ -30,6 +30,7 @@ dependencies = [
     # 运行 FastAPI 应用的服务程序。
     "uvicorn==0.54.0",
     "psycopg[binary]==3.3.6",
+    "mcp==2.3.0",
 ]
 
 # 开发和测试时使用的依赖组，不属于上面的核心运行依赖。

@@ -19,7 +19,7 @@ DEFAULT_THRESHOLD = 0.6
 DEFAULT_LAMBDA = 0.1
 CANDIDATE_MULTIPLIER = 3
 
-_COLUMNS = "id, title, content, source_id, department, scope_text, version"
+_COLUMNS = "id, title, content, source_id, department, scope_text, version, scope_payload"
 
 
 @dataclass(frozen=True)
@@ -207,6 +207,12 @@ def retrieve(
         risk_level=risk_level,
     )
     for row in keyword_hits:
-        row["keyword_score"] = keyword_score(row["content"], keywords)
+        payload = row.get("scope_payload") or {}
+        terms = payload.get("symptom_cluster", []) if isinstance(payload, dict) else []
+        row["keyword_score"] = keyword_score(row["content"], keywords, terms)
+
+    # SQL 的 ILIKE 只负责捞候选，可能是长句切出来的碎片偶然重合；
+    # 严格规则判为 0 分的，说明和这个词条没有真实关系，直接丢掉。
+    keyword_hits = [row for row in keyword_hits if row["keyword_score"] > 0]
 
     return fuse(vector_hits, keyword_hits, limit=top_k, lam=lam)

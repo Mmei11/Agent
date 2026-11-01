@@ -72,6 +72,9 @@ jobs:
       - name: Retrieval recall@5
         run: uv run python -m eval.recall_eval
 
+      - name: Structured faithfulness
+        run: uv run python -m eval.faithfulness_eval
+
       - name: Model-mode hard assertions (dev)
         run: uv run python -m eval.run_eval --use-model --split dev
 

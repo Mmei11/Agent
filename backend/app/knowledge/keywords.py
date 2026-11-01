@@ -60,10 +60,33 @@ def extract_keywords(question: str) -> list[str]:
     return kept[:MAX_KEYWORDS]
 
 
-def keyword_score(content: str, keywords: list[str]) -> float:
-    """命中关键词数 / 关键词总数，天然封顶 1.0。"""
+def cluster_match(keyword: str, terms: list[str]) -> bool:
+    """关键词是否命中同义词表。
+
+    只认两种情况：完全相等，或词条包含在关键词里（"腹痛" ⊂ "右下腹痛"）。
+    **不认关键词是词条的片段**——"不上" 是 "喘不上气" 的片段，这种匹配
+    只是长句被切出来的偶然重合，不代表语义相关。
+    """
+    low = keyword.lower()
+    return any(low == term.lower() or term.lower() in low for term in terms)
+
+
+def keyword_score(
+    content: str,
+    keywords: list[str],
+    cluster_terms: list[str] | None = None,
+) -> float:
+    """命中关键词数 / 关键词总数，天然封顶 1.0。
+
+    正文按子串匹配即可；同义词表用 cluster_match 的严格规则。
+    """
     if not keywords:
         return 0.0
     lowered = content.lower()
-    hits = sum(1 for keyword in keywords if keyword.lower() in lowered)
+    terms = cluster_terms or []
+    hits = sum(
+        1
+        for keyword in keywords
+        if keyword.lower() in lowered or cluster_match(keyword, terms)
+    )
     return hits / len(keywords)

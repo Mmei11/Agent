@@ -11,7 +11,7 @@ import pytest
 
 from backend.app.knowledge import db
 from backend.app.knowledge.indexer import build_index
-from backend.app.knowledge.keywords import extract_keywords, keyword_score
+from backend.app.knowledge.keywords import cluster_match, extract_keywords, keyword_score
 from backend.app.knowledge.retrieval import _filter_sql, fuse, retrieve
 from backend.app.knowledge.schema import load_entries
 
@@ -50,6 +50,28 @@ def test_keyword_score_is_a_ratio():
     assert keyword_score(content, ["腹痛", "皮疹"]) == 0.5
     assert keyword_score(content, ["皮疹"]) == 0.0
     assert keyword_score(content, []) == 0.0
+
+
+def test_cluster_match_accepts_equal_and_containing_terms():
+    assert cluster_match("挂号", ["就诊准备", "挂号"]) is True
+    # 词条包含在关键词里也算：用户说"右下腹痛"，词条是"腹痛"
+    assert cluster_match("右下腹痛", ["腹痛"]) is True
+
+
+def test_cluster_match_rejects_fragments_of_longer_terms():
+    """长句切出来的碎片偶然等于词条的一部分，不算命中。
+
+    这三条都是 faithfulness 评测里真实出现过的误报来源。
+    """
+    assert cluster_match("不上", ["呼吸困难", "喘不上气"]) is False
+    assert cluster_match("吃什", ["吃什么药"]) is False
+    assert cluster_match("今天", ["就诊准备", "就医"]) is False
+
+
+def test_keyword_score_counts_whole_cluster_terms():
+    content = "无关正文"
+    assert keyword_score(content, ["挂号"], ["挂号"]) == 1.0
+    assert keyword_score(content, ["不上"], ["喘不上气"]) == 0.0
 
 
 # ---------- 融合 ----------
