@@ -97,4 +97,5 @@ jobs:
             eval/results/agent-eval-report.md
             eval/results/redteam/redteam-report.md
             eval/results/nightly-repeat/repeat-report.md
+            logs/audit.jsonl
           if-no-files-found: ignore
