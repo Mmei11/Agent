@@ -48,6 +48,9 @@ jobs:
       - name: Risk probe (rules only)
         run: uv run python -m eval.risk_probe --output eval/results/risk-probe-ci.json
 
+      - name: Adversarial layered safety
+        run: uv run python -m eval.adversarial_eval --output eval/results/adversarial-ci.json
+
       - name: Gate self-check
         run: uv run python -m eval.self_check
 
@@ -63,6 +66,7 @@ jobs:
             eval/results/agent-eval-report.md
             eval/results/redteam/redteam-report.md
             eval/results/risk-probe-ci.json
+            eval/results/adversarial-ci.json
           if-no-files-found: ignore
 
   docker:

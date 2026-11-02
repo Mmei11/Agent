@@ -3,7 +3,8 @@
 import os
 
 from backend.app.agent.state import ConsultationState
-from backend.app.observability import current_trace
+from backend.app.observability import current_trace, span
+from backend.app.safety.input_rail import inspect
 
 REQUIRED_FIELDS = ["主要症状", "持续时间", "部位", "程度", "伴随表现", "已知背景"]
 
@@ -86,12 +87,21 @@ def extract_facts_auto(message: str, meta: dict | None = None) -> tuple[dict, di
 
 
 def intake(state: ConsultationState) -> dict:
-    """入口节点：提取字段，合并多轮信息，更新缺失列表。
+    """入口节点：先过输入层，再提取字段，合并多轮信息，更新缺失列表。
 
-    新值追加到已有字段列表；collected_facts 直接覆盖（节点自己控制合并逻辑）。
-    missing_fields 覆盖（每轮重新计算）。
+    输入层在这里而不是单独一个节点：这样 PII 在进入抽取模型和 checkpoint
+    之前就已经脱敏，同时不改变现有图的拓扑与测试断言。
     """
-    message = state.latest_user_message
+    with span("safety.input", kind="safety") as record:
+        verdict = inspect(state.latest_user_message)
+        record.attributes.update(
+            {
+                "input.level": verdict.level,
+                "input.labels": list(verdict.labels),
+                "input.pii": verdict.has_pii,
+            }
+        )
+    message = verdict.redacted_text
     meta = {}
     new_facts, new_evidence = extract_facts_auto(message, meta)
 
@@ -117,6 +127,10 @@ def intake(state: ConsultationState) -> dict:
     return {
         "turn_id": state.turn_id + 1,
         "trace_id": scope.trace_id if scope else "",
+        # 用脱敏后的文本回写，后续节点和 checkpoint 都不再持有原始 PII。
+        "latest_user_message": message,
+        "input_level": verdict.level,
+        "input_labels": list(verdict.labels),
         "conversation": [{"role": "user", "text": message}],
         "collected_facts": collected,
         "fact_evidence": evidence,
@@ -129,6 +143,8 @@ def intake(state: ConsultationState) -> dict:
                 "node": "intake",
                 "fact_count": len(new_facts),
                 "missing_count": len(missing),
+                "input_level": verdict.level,
+                "input_labels": list(verdict.labels),
                 "trace_id": scope.trace_id if scope else "",
                 **meta,
             }

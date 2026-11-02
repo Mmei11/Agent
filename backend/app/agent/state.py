@@ -28,6 +28,10 @@ class ConsultationState(BaseModel):
 
     # --- 用户输入 ---
     latest_user_message: str = ""
+    # --- 输入层结论（Phase 5）---
+    # input_level: safe / vague / risk / jailbreak；intake 写入，risk_check 读取。
+    input_level: str = ""
+    input_labels: list = []
     # 对话按轮追加，供刷新页面时从 SQLite 检查点恢复。
     conversation: Annotated[list, operator.add] = []
 
@@ -49,6 +53,8 @@ class ConsultationState(BaseModel):
 
     # --- 追踪与控制 ---
     followup_count: int = 0
+    # 连续含糊轮数：命中 vague 时 +1，正常轮重置为 0；供策略层决定何时收束。
+    vague_turns: int = 0
     risk_flags: list = []  # 每轮风险筛查覆盖上轮结果
     tool_results: dict = {}
 

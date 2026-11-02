@@ -30,6 +30,9 @@ ALLOWED_NAMES = {
     # 运行开关
     "USE_MODEL",
     "CONSULTATION_DB_PATH",
+    # Phase 5 安全
+    "SAFETY_POLICY_PATH",
+    "AUDIT_LOG_PATH",
     # 本地轨迹
     "TRACE_SINK",
     "TRACE_PATH",

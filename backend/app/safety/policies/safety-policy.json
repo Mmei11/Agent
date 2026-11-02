@@ -1,0 +1,5 @@
+{
+  "vague_close_after": 2,
+  "risk_action": "FINALIZE",
+  "jailbreak_action": "FINALIZE"
+}

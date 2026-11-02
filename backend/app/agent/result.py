@@ -17,6 +17,8 @@ class ConsultationResult(BaseModel):
     unknowns: list = []  # 仍不确定的字段名，["已知背景"]
     tools_used: list = []  # 调过的工具名，["department_route"]
     next_step: str = ""  # 下一步建议，如"建议就诊方向：神经内科"
+    # 引用知识时的出处；没有引用则为空。输出层用它判断是否需要来源校验。
+    source_note: str = ""
     risk_message: str | None = None  # 风险提示，无则 None
     limitations: str = "本系统不提供确诊、处方或用药建议，请咨询专业人员。"  # 固定限制说明
 
@@ -39,6 +41,16 @@ def build_completed_result(collected_facts: dict, missing_fields: list, tool_res
     else:  # 无匹配，不编造
         next_step = "暂无法判断科室方向，建议结合实际情况就诊"
 
+    # 有命中就带出处；未核实的出处必须标明，避免看起来像权威指南。
+    source_note = ""
+    hits = dept_result.get("hits") or []
+    if dept and hits:
+        source = hits[0].get("source") or {}
+        title = source.get("title") or source.get("id") or ""
+        if title:
+            suffix = "" if source.get("verified") else "（未核实）"
+            source_note = f"来源：{title}{suffix}"
+
     # 用 ConsultationResult schema 构建并校验，model_dump() 转成普通字典
     result = ConsultationResult(
         status="completed",
@@ -46,6 +58,7 @@ def build_completed_result(collected_facts: dict, missing_fields: list, tool_res
         unknowns=missing_fields,  # 仍不确定的字段
         tools_used=tools_used,  # 调过的工具
         next_step=next_step,  # 下一步建议
+        source_note=source_note,
     )
     return result.model_dump()  # Pydantic 模型转字典，方便 JSON 序列化
 
@@ -79,6 +92,19 @@ def build_vague_result() -> dict:
     return result.model_dump()
 
 
+def build_refusal_result() -> dict:
+    """越狱/注入路径：不执行请求，给固定拒绝话术。
+
+    文案本身不能含“确诊/处方/剂量/停药”，否则会被 final_check 再拦一次。
+    """
+    result = ConsultationResult(
+        status="refused",
+        risk_message="无法执行这个请求。本系统只处理虚构症状描述，不提供医疗结论或治疗指导。",
+        next_step="请描述症状，或咨询专业医生",
+    )
+    return result.model_dump()
+
+
 def build_error_result(reason: str) -> dict:
     """错误路径：工具失败或输出校验没过。
 
@@ -102,8 +128,8 @@ def render_text(structured: dict) -> str:
     """
     status = structured.get("status")  # 取结局类型
 
-    if status == "risk_route":
-        # 风险/含糊路径：只返回 risk_message
+    if status in ("risk_route", "refused"):
+        # 风险/含糊/拒答路径：只返回 risk_message
         return structured.get("risk_message", "")
 
     if status == "error":
@@ -127,6 +153,8 @@ def render_text(structured: dict) -> str:
         parts.append("调用的工具：" + "、".join(tools))
 
     parts.append(structured.get("next_step", ""))  # 下一步建议
+    if structured.get("source_note"):
+        parts.append(structured["source_note"])
     # limitations 不在这里拼，由 output 节点在边界检查通过后追加
 
     return "\n\n".join(parts)  # 各部分之间空行分隔

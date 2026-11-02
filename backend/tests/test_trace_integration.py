@@ -39,24 +39,31 @@ def test_graph_nodes_emit_spans_and_link_trace_id():
         )
 
     assert [record.name for record in sink.records] == [
+        "safety.input",
         "intake",
+        "safety.policy",
         "risk_check",
         "decision",
         "tool",
         "decision",
+        "safety.output",
         "output",
         "consultation.turn",
     ]
-    assert all(record.kind in ("node", "trace") for record in sink.records)
+    assert all(record.kind in ("node", "trace", "safety") for record in sink.records)
     assert all(record.session_id == "sess-graph" for record in sink.records)
-    # 根 span 是 consultation.turn，所有节点都挂在它下面。
+    # 根 span 是 consultation.turn；节点直接挂在根下，safety span 挂在所属节点下。
     root = next(record for record in sink.records if record.name == "consultation.turn")
     assert root.parent_span_id is None
-    assert all(
-        record.parent_span_id == root.span_id
-        for record in sink.records
-        if record.name != "consultation.turn"
-    )
+    node_names = {"intake", "risk_check", "decision", "tool", "followup", "output"}
+    for record in sink.records:
+        if record.name == "consultation.turn":
+            continue
+        parent = next(item for item in sink.records if item.span_id == record.parent_span_id)
+        if record.name in node_names:
+            assert parent.span_id == root.span_id
+        else:
+            assert parent.name in node_names
     assert result["trace_id"] == trace.trace_id
     assert all(entry["trace_id"] == trace.trace_id for entry in result["trace"])
 

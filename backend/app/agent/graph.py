@@ -15,13 +15,17 @@ from backend.app.agent.intake import intake  # 入口节点，提取字段
 from backend.app.agent.result import (
     build_completed_result,
     build_error_result,
+    build_refusal_result,
     build_risk_result,
     build_vague_result,
     render_text,
 )
 from backend.app.agent.state import ConsultationState  # 状态类型
-from backend.app.observability import current_trace, traced_node
-from backend.app.safety.rule_engine import final_check, screen  # 风险检查和最终输出检查
+from backend.app.observability import current_trace, span, traced_node
+from backend.app.safety.audit import AuditEvent, input_digest, write as write_audit
+from backend.app.safety.output_rail import check as check_output
+from backend.app.safety.policy import decide as decide_policy
+from backend.app.safety.rule_engine import final_check  # 最终输出检查
 from backend.app.tools.knowledge_tools import DEPARTMENT_ROUTE
 from backend.app.tools.registry import call_tool as _live_call_tool
 from backend.app.tools.registry import stub_call_tool
@@ -43,21 +47,49 @@ def _trace_id() -> str:
 
 
 def risk_check(state: ConsultationState) -> dict:
-    """风险检查：对用户消息做风险筛查。命中风险走固定分支，含糊标记不确定。"""
-    result = screen(state.latest_user_message)  # 调安全模块检查
-    flags = []
-    if result["level"] == "risk":
-        flags.append(result["rule"])  # 命中风险 → R001
-    elif result["level"] == "vague":
-        flags.append(result["rule"])  # 含糊 → V001，保守分流
+    """读取输入层结论，按策略优先级决定是否升级，并写审计。"""
+    level = state.input_level or "safe"
+    labels = list(state.input_labels)
+    flags: list[str] = []
+    if level == "risk":
+        flags.append("R001")
+    elif level == "vague":
+        flags.append("V001")
+    elif level == "jailbreak":
+        flags.extend(label for label in labels if label.startswith("I"))
+
+    vague_turns = state.vague_turns + 1 if level == "vague" else 0
+    probe = state.model_copy(update={"risk_flags": flags, "vague_turns": vague_turns})
+    with span("safety.policy", kind="safety", attributes={"policy.level": level}) as record:
+        policy_decision = decide_policy(None, probe, "")
+        record.attributes["policy.rule"] = policy_decision.rule
+        record.attributes["policy.action"] = policy_decision.action
+
+    if policy_decision.audit:
+        write_audit(
+            AuditEvent(
+                layer="policy",
+                rule=policy_decision.rule or "",
+                action=policy_decision.action or "",
+                session_id=state.session_id,
+                turn_id=state.turn_id,
+                input_digest=input_digest(state.latest_user_message),
+                detail=policy_decision.reason,
+            )
+        )
+
     return {
         "risk_flags": flags,
-        # 摘要只留级别和规则号，完整 screen 结果不再复制进 checkpoint。
+        "vague_turns": vague_turns,
+        # 摘要只留级别和规则号，完整输入结论不再复制进 checkpoint。
         "trace": [
             {
                 "node": "risk_check",
-                "risk_level": result["level"],
-                "rule": result["rule"],
+                "input_level": level,
+                "risk_level": level,
+                "rule": flags[0] if flags else None,
+                "policy_rule": policy_decision.rule,
+                "policy_action": policy_decision.action,
                 "trace_id": _trace_id(),
             }
         ],
@@ -72,15 +104,20 @@ def route_after_risk(state: ConsultationState) -> str:
 
 
 def decision(state: ConsultationState) -> dict:
-    """决策节点：模型（或规则）选动作，置信度闸门，再由程序校验权限。
+    """决策节点：模型（或规则）选动作，置信度闸门，策略层复核，再由程序校验权限。
 
-    trace 记录模型选了什么、依据和置信度、最终执行什么、是否被降级。
+    trace 记录模型选了什么、策略层是否覆盖、最终执行什么、是否被降级。
     """
     result = choose_auto(state, MAX_FOLLOWUPS)
     trusted_choice, downgraded = gate_by_confidence(
         result.action, result.confidence, state, MAX_FOLLOWUPS
     )
-    final_action = validate_action(trusted_choice, state, MAX_FOLLOWUPS)
+    policy_decision = decide_policy(None, state, trusted_choice)
+    final_action = (
+        policy_decision.action
+        if policy_decision.action
+        else validate_action(trusted_choice, state, MAX_FOLLOWUPS)
+    )
 
     return {
         "next_action": final_action,  # 最终执行的动作，决定走哪条边
@@ -90,7 +127,9 @@ def decision(state: ConsultationState) -> dict:
                 "model_choice": result.action,  # 模型或规则原本选了什么
                 "reason": result.reason,  # 模型给的依据
                 "confidence": result.confidence,  # 规则决策为 None
-                "final_action": final_action,  # 闸门和校验后的动作
+                "policy_rule": policy_decision.rule,
+                "policy_action": policy_decision.action,
+                "final_action": final_action,  # 策略、闸门和校验后的动作
                 "downgraded_by_confidence": downgraded,  # 是否因低置信度被收回
                 "same": result.action == final_action,  # False 说明被改过
                 "model_usage": result.usage,  # token 用量与成本估算，供 M4 统计
@@ -186,7 +225,10 @@ def output(state: ConsultationState) -> dict:
         ),
         None,
     )
-    if state.risk_flags:  # 命中风险或含糊
+    if state.input_level == "jailbreak":
+        # 输入试图改写系统规则：不执行，直接固定拒绝。
+        structured = build_refusal_result()
+    elif state.risk_flags:  # 命中风险或含糊
         rule = state.risk_flags[0]
         if rule == "V001":  # 含糊 → 保守提示
             structured = build_vague_result()
@@ -203,7 +245,8 @@ def output(state: ConsultationState) -> dict:
     # 渲染文案（不含 limitations，先检查核心内容）
     rendered = render_text(structured)
 
-    # 最终检查：只检查系统生成的建议（next_step 和 risk_message），不检查用户原话
+    # 第一道：最终检查只检查系统生成的建议（next_step 和 risk_message），
+    # 不检查用户原话。
     check_text = structured.get("next_step", "") + " " + (structured.get("risk_message") or "")
     boundary = final_check(check_text)
     if boundary["level"] != "safe":
@@ -212,6 +255,28 @@ def output(state: ConsultationState) -> dict:
     else:
         # 检查通过后追加 limitations（说明性文字，不含实际建议）
         rendered = rendered + "\n\n" + structured.get("limitations", "")
+
+    # 第二道：guardrails 校验器复核完整文案；失败整段替换为安全兜底。
+    with span("safety.output", kind="safety") as record:
+        output_verdict = check_output(
+            rendered, uses_knowledge=bool(structured.get("source_note"))
+        )
+        record.attributes["output.passed"] = output_verdict.passed
+        record.attributes["output.violations"] = len(output_verdict.violations)
+    if not output_verdict.passed:
+        write_audit(
+            AuditEvent(
+                layer="output",
+                rule="F003",
+                action="REPLACE",
+                session_id=state.session_id,
+                turn_id=state.turn_id,
+                input_digest=input_digest(state.latest_user_message),
+                detail="; ".join(output_verdict.violations),
+            )
+        )
+        structured = build_error_result("输出内容超出安全边界")
+        rendered = output_verdict.text
 
     return {
         "final_result": structured,  # 结构化字典，给测试和前端解析
@@ -223,6 +288,8 @@ def output(state: ConsultationState) -> dict:
                 "result_status": structured.get("status"),
                 "boundary_level": boundary["level"],
                 "boundary_rule": boundary.get("rule"),
+                "output_passed": output_verdict.passed,
+                "output_violations": list(output_verdict.violations),
                 "trace_id": _trace_id(),
             }
         ],

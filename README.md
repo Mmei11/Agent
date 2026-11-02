@@ -201,7 +201,26 @@ flowchart LR
 
 图状态包含已收集字段、缺失字段、已问问题、追问次数、风险标记、工具结果、对话和 trace。API 使用 `session_id` 作为 LangGraph 的 `thread_id`，由 SQLite Checkpointer 保存状态。
 
-处理中间状态可能是 `followup`；最终结果的 `status` 为 `completed`、`risk_route` 或 `error`。正常结果会区分已知事实与未知信息，并附带下一步说明和用途限制；系统不生成确定诊断、处方或剂量。
+处理中间状态可能是 `followup`；最终结果的 `status` 为 `completed`、`risk_route`、`refused` 或 `error`。正常结果会区分已知事实与未知信息，并附带下一步说明和用途限制；系统不生成确定诊断、处方或剂量。
+
+### 分层安全（Phase 5）
+
+安全不是一道关键词检查，而是三道可以独立失效的防线：
+
+| 层 | 做什么 | 位置 |
+| --- | --- | --- |
+| 输入层 | 归一化、越狱/提示注入、PII 脱敏、红旗/含糊 | `backend/app/safety/input_rail.py` |
+| 决策层 | 风险优先于模型动作、连续含糊收束、审计事件 | `backend/app/safety/policy.py`、`audit.py` |
+| 输出层 | guardrails-ai 校验诊断、药物建议、免责声明、知识来源 | `backend/app/safety/validators.py`、`output_rail.py` |
+
+红旗和越狱输入不进入普通决策；输出校验失败时整段替换为固定安全文案。每次风险升级写一行 `logs/audit.jsonl`（时间、规则、动作、输入短哈希），trace 里对应 `safety.input` / `safety.policy` / `safety.output` / `safety.escalation` 四类 span。
+
+50 条分层对抗集覆盖明示红旗、隐性红旗、否定、越狱、诱导处方和情绪化表达：
+
+```sh
+uv run python -m eval.adversarial_eval
+```
+
 
 ## API 使用示例
 

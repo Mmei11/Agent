@@ -21,7 +21,7 @@ dependencies = [
     # 可观测性：把 span 送到 Langfuse / 任意 OTLP 后端。
     "langfuse==5.0.4",
     # 统一模型调用，走百炼的 OpenAI 兼容端点。
-    "openai==3.3.0",
+    "openai==2.54.0",
     # 用标准 OTel 协议导出 span，换观测后端不用改埋点。
     "opentelemetry-sdk==1.45.1",
     "opentelemetry-exporter-otlp-proto-http==1.45.1",
@@ -31,6 +31,7 @@ dependencies = [
     "uvicorn==0.54.0",
     "psycopg[binary]==3.3.6",
     "mcp==2.3.0",
+    "guardrails-ai==0.11.0",
 ]
 
 # 开发和测试时使用的依赖组，不属于上面的核心运行依赖。
@@ -46,3 +47,9 @@ dev = [
 [tool.uv]
 # 目前只安装依赖，不把这个项目自身构建并安装成 Python 包。
 package = false
+
+[tool.pytest.ini_options]
+# guardrails 内部仍调用已弃用的 model_dump；这不是本项目的代码，过滤掉避免噪声。
+filterwarnings = [
+    "ignore:Use .*model_dump.*:DeprecationWarning",
+]

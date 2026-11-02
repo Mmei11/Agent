@@ -18,6 +18,7 @@
 | 2026-10-27 | Phase 2 | 第二课：图节点与模型调用埋点；state.trace 改摘要并截断到 80 条；新增 trace_report | 未变 | 未变 | 未变 | **4 轮模型会话 32 span / 8,774 输入 + 627 输出 token / ¥0.008273 / 0 错误；intake p95 3,290ms、decision p95 2,022ms** | — | 会话视图能逐轮展开 span 树；决策子 span 记录 missing_fields、action、confidence；mock 33/33 仍通过 |
 | 2026-10-28 | Phase 3 | 冻结基线（`phase3-baseline`），未改业务代码 | 0.9202（LLM；keyword 0.4865） | 0.3125 / 0.50 / 0.00 | 0.00 | 104 调用 / 33 案例；102,814 输入 / 7,853 输出 token；¥0.097951；0 回退；p50 5.236s / p95 18.846s | — | 33/33；M1 在 Phase 1 波动内；holdout 召回仍为 0 |
 | 2026-10-28 | Phase 3 | 第 1 课：33 条案例改为声明式硬断言，划 dev 26 / holdout 7；runner 增加 `--split` / `--case` | 未变 | 未变 | 未变 | 未变 | — | 33/33、dev 26/26、holdout 7/7；139 tests；故意改错断言 exit=1 |
+| 2026-11-02 | Phase 5 | 分层安全：输入/决策/输出三道护栏、50 条对抗集、审计与三层 safety span；红旗词表补隐性替代表述 | 未变 | **1.00 / 1.00 / 1.00** | 0.00 | **104 调用 / 104,533 输入 + 7,788 输出 token / ¥0.099196 / p50 5.282s / p95 20.566s；输出层 p95 1.43ms** | — | M2 holdout 0.00→1.00；24 条红旗探针 24/24；对抗集 dev/holdout 门禁全过；279 tests；红队 dev 6/6 |
 
 ## 基线明细
 
@@ -167,3 +168,18 @@
 - M4 p95 18.694s，未达 <8s 目标；M2 严格召回 0.3125，未达 Phase 5 目标
 - 单测：166 passed
 - 结论：流程与安全门禁已可证明；质量尺子对追问可用，对有据/边界样本不足；延迟与红旗改写召回是下一阶段缺口
+
+**2026-11-02 · Phase 5：分层安全**
+
+- 新增 `backend/app/safety/input_rail.py` / `policy.py` / `audit.py` / `validators.py` / `output_rail.py`
+- 输入层：NFKC + 去零宽；8 条越狱/注入模式；PII 复用 `observability/redact.py`；红旗/含糊复用 `rule_engine.screen()`
+- 决策层：risk > jailbreak > 连续含糊；`policies/safety-policy.json` 可评审；审计写 `logs/audit.jsonl`（输入短哈希，不落原文）
+- 输出层：guardrails-ai 0.11.0 四个自定义校验器，`on_fail="fix"`，固定安全兜底；关闭 guardrails 遥测；不使用 reask
+- 依赖：guardrails-ai 0.11.0 要求 `openai<3`，openai 从 3.3.0 降到 2.54.0；L1 预检 228 tests + 百炼真实调用通过
+- 红旗词表新增 30 条隐性替代表述；24 条探针 all/dev/holdout 严格召回均为 1.00，误报率 0.00（Phase 0 基线 holdout 0.00）
+- 新增 50 条分层对抗集（dev 30 / holdout 20）：红旗召回、越狱召回、输出拦截、安全误伤四项门禁全过；CI `quality` job 已接入
+- 图接线：intake 前输入层并脱敏，risk_check 走策略并审计，output 增加 `refused` 分支和 guardrails 第二道复核；33/33 仍通过
+- trace：新增 `safety.input` / `safety.policy` / `safety.output` / `safety.escalation`；JSONL 实测手机号和姓名均未落盘
+- 单测：279 passed
+- 模型模式：33/33；104 次调用 / 104,533 输入 + 7,788 输出 token / ¥0.099196 / p50 5.282s / p95 20.566s / max 25.248s
+- 局限：对抗集自写、holdout 非真正盲测；输出层为模式匹配，未引入 LLM 第二意见；p95 比 Phase 3 基线 18.8s 高约 1.7s，落在模型波动内，输出层本身 p95 仅 1.43ms
