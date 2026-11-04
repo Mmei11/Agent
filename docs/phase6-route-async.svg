@@ -1,0 +1,72 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="700" viewBox="0 0 1080 700" font-family="-apple-system, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif">
+  <rect width="1080" height="700" fill="#f8fafc"/>
+
+  <text x="40" y="44" font-size="22" font-weight="700" fill="#0f172a">路由异步化：谁在等，谁在跑</text>
+  <text x="40" y="72" font-size="14" fill="#64748b">async def 只是语法许可；真正决定并发的是“阻塞代码被搬到了哪个执行者上”。</text>
+
+  <!-- ========== Row A ========== -->
+  <text x="40" y="118" font-size="15" font-weight="700" fill="#dc2626">❌ 反例：async def 里直接调同步函数</text>
+
+  <text x="40" y="157" font-size="13" fill="#475569">事件循环</text>
+  <rect x="140" y="126" width="880" height="56" rx="8" fill="#ffffff" stroke="#e2e8f0"/>
+  <rect x="152" y="136" width="556" height="36" rx="6" fill="#fee2e2" stroke="#dc2626" stroke-width="1.5"/>
+  <text x="170" y="159" font-size="13" fill="#991b1b">graph.invoke() 同步阻塞 3s —— 事件循环无法调度任何其他协程</text>
+  <rect x="724" y="136" width="132" height="36" rx="6" fill="#f1f5f9" stroke="#cbd5e1"/>
+  <text x="790" y="159" font-size="12" fill="#64748b" text-anchor="middle">请求 2 排队</text>
+  <rect x="868" y="136" width="140" height="36" rx="6" fill="#f1f5f9" stroke="#cbd5e1"/>
+  <text x="938" y="159" font-size="12" fill="#64748b" text-anchor="middle">SSE 心跳停发</text>
+  <text x="140" y="202" font-size="12" fill="#94a3b8">一个请求在等模型，所有请求一起等；流式进度也卡住。比同步 def 更糟。</text>
+
+  <!-- ========== Row B ========== -->
+  <text x="40" y="252" font-size="15" font-weight="700" fill="#d97706">⚠️ L2 前：同步 def 路由</text>
+
+  <text x="40" y="288" font-size="13" fill="#475569">事件循环</text>
+  <rect x="140" y="258" width="880" height="44" rx="8" fill="#ffffff" stroke="#e2e8f0"/>
+  <rect x="152" y="266" width="120" height="28" rx="5" fill="#ecfdf5" stroke="#34d399"/>
+  <text x="212" y="285" font-size="12" fill="#047857" text-anchor="middle">接请求 1</text>
+  <rect x="284" y="266" width="120" height="28" rx="5" fill="#ecfdf5" stroke="#34d399"/>
+  <text x="344" y="285" font-size="12" fill="#047857" text-anchor="middle">接请求 2</text>
+  <rect x="416" y="266" width="120" height="28" rx="5" fill="#ecfdf5" stroke="#34d399"/>
+  <text x="476" y="285" font-size="12" fill="#047857" text-anchor="middle">接请求 3</text>
+  <text x="560" y="285" font-size="12" fill="#94a3b8">事件循环本身是空闲的</text>
+
+  <text x="40" y="348" font-size="13" fill="#475569">anyio 线程池</text>
+  <rect x="140" y="318" width="880" height="44" rx="8" fill="#ffffff" stroke="#e2e8f0"/>
+  <rect x="152" y="326" width="196" height="28" rx="5" fill="#fffbeb" stroke="#f59e0b"/>
+  <text x="250" y="345" font-size="12" fill="#92400e" text-anchor="middle">graph.invoke()</text>
+  <rect x="360" y="326" width="196" height="28" rx="5" fill="#fffbeb" stroke="#f59e0b"/>
+  <text x="458" y="345" font-size="12" fill="#92400e" text-anchor="middle">graph.invoke()</text>
+  <rect x="568" y="326" width="196" height="28" rx="5" fill="#fffbeb" stroke="#f59e0b"/>
+  <text x="666" y="345" font-size="12" fill="#92400e" text-anchor="middle">graph.invoke()</text>
+  <text x="786" y="345" font-size="12" fill="#94a3b8">默认 40 个名额，和别的同步任务共享</text>
+  <text x="140" y="392" font-size="12" fill="#94a3b8">能并发，但线程池大小不可调，也不受你控制；流式路由仍是 async 里直接调同步函数。</text>
+
+  <!-- ========== Row C ========== -->
+  <text x="40" y="442" font-size="15" font-weight="700" fill="#16a34a">✅ 现在：async def + run_in_executor</text>
+
+  <text x="40" y="478" font-size="13" fill="#475569">事件循环</text>
+  <rect x="140" y="448" width="880" height="44" rx="8" fill="#ffffff" stroke="#e2e8f0"/>
+  <rect x="152" y="456" width="110" height="28" rx="5" fill="#eff6ff" stroke="#60a5fa"/>
+  <text x="207" y="475" font-size="12" fill="#1d4ed8" text-anchor="middle">接请求</text>
+  <rect x="274" y="456" width="110" height="28" rx="5" fill="#eff6ff" stroke="#60a5fa"/>
+  <text x="329" y="475" font-size="12" fill="#1d4ed8" text-anchor="middle">接请求</text>
+  <rect x="396" y="456" width="150" height="28" rx="5" fill="#eff6ff" stroke="#60a5fa"/>
+  <text x="471" y="475" font-size="12" fill="#1d4ed8" text-anchor="middle">推 SSE 心跳 / 事件</text>
+  <text x="570" y="475" font-size="12" fill="#94a3b8">始终在调度，从不等模型</text>
+
+  <text x="40" y="538" font-size="13" fill="#475569">图线程池</text>
+  <rect x="140" y="508" width="880" height="44" rx="8" fill="#ffffff" stroke="#e2e8f0"/>
+  <rect x="152" y="516" width="196" height="28" rx="5" fill="#ecfdf5" stroke="#34d399"/>
+  <text x="250" y="535" font-size="12" fill="#047857" text-anchor="middle">graph.invoke()</text>
+  <rect x="360" y="516" width="196" height="28" rx="5" fill="#ecfdf5" stroke="#34d399"/>
+  <text x="458" y="535" font-size="12" fill="#047857" text-anchor="middle">graph.invoke()</text>
+  <rect x="568" y="516" width="196" height="28" rx="5" fill="#ecfdf5" stroke="#34d399"/>
+  <text x="666" y="535" font-size="12" fill="#047857" text-anchor="middle">graph.invoke()</text>
+  <text x="786" y="535" font-size="12" fill="#94a3b8">专用池：mock 8 / 模型 64</text>
+  <text x="140" y="582" font-size="12" fill="#94a3b8">池大小就是“同时在跑的图”的上限；SQLite 和同步 LLM 客户端一行没改。</text>
+
+  <!-- ========== Bottom ========== -->
+  <rect x="40" y="606" width="1000" height="66" rx="10" fill="#0f172a"/>
+  <text x="62" y="634" font-size="14" fill="#f8fafc" font-weight="600">异步化不让单个请求变快，而是让“等待”不再占用调度器。</text>
+  <text x="62" y="658" font-size="13" fill="#cbd5e1">边界公式：async 路由只做调度，一切阻塞调用都 await 到线程池；同步实现 + 异步外壳。</text>
+</svg>
