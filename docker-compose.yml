@@ -30,6 +30,8 @@ services:
     environment:
       CONSULTATION_DB_PATH: /data/consultations.sqlite
       USE_MODEL: ${USE_MODEL:-0}
+      # 不填时按 USE_MODEL 自动取默认：mock 8、模型 64。
+      GRAPH_MAX_WORKERS: ${GRAPH_MAX_WORKERS:-}
       DASHSCOPE_API_KEY: ${DASHSCOPE_API_KEY:-}
       DASHSCOPE_MODEL: ${DASHSCOPE_MODEL:-qwen-plus}
       DASHSCOPE_BASE_URL: ${DASHSCOPE_BASE_URL:-https://dashscope.aliyuncs.com/compatible-mode/v1}

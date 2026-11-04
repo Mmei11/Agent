@@ -47,14 +47,9 @@ TOOL_FIXTURE = "头部不适两天，前额，程度轻，伴有恶心，无病�
 
 
 def reset_api(db_path: Path) -> None:
-    """Close the previous saver and make the API open an isolated SQLite DB."""
-    # 旧 saver 若存在，先关闭它持有的 SQLite 连接。
-    if routes._saver is not None:
-        routes._saver.conn.close()
-    # 清空 saver 缓存，要求 API 下次重新创建。
-    routes._saver = None
-    # 清空 graph 缓存，让新 graph 使用新的 saver。
-    routes._compiled_app = None
+    """Close open savers and make the API open an isolated SQLite DB."""
+    # 关闭进程内所有已打开的 saver；每个线程各自持有一份连接。
+    routes.reset_app()
     # 设置本案例专用数据库路径，避免不同案例互相污染。
     os.environ["CONSULTATION_DB_PATH"] = str(db_path)
 
@@ -347,12 +342,8 @@ def run(
             for index, case in enumerate(cases):
                 # 每个案例单独使用数据库，再把返回的结果加入列表。
                 results.append(check_case(case, client, temp / f"case-{index}.sqlite"))
-            # 案例结束后关闭最后一次打开的 SQLite 连接。
-            if routes._saver is not None:
-                routes._saver.conn.close()
-            # 清空全局 saver 和 graph 缓存，避免留下已关闭连接。
-            routes._saver = None
-            routes._compiled_app = None
+            # 案例结束后关闭所有线程打开的 SQLite 连接。
+            routes.reset_app()
     # try 中途出错时也会执行下面的环境清理。
     finally:
         # 原本未设置 USE_MODEL 时，删除本次临时加入的设置。

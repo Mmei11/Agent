@@ -28,8 +28,7 @@ from backend.app.api import routes  # noqa: E402
 
 def main() -> None:
     # 重置模块级懒加载，确保用的是上面设置的临时数据库。
-    routes._compiled_app = None
-    routes._saver = None
+    routes.reset_app()
 
     with TestClient(routes.app) as client:
         created = client.post("/sessions", json={"initial_message": "头部不适"})

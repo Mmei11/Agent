@@ -1,0 +1,87 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="660" viewBox="0 0 1120 660" font-family="'DM Sans','Noto Sans SC',-apple-system,BlinkMacSystemFont,sans-serif">
+  <defs>
+    <marker id="arrow" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto">
+      <path d="M0,0 L9,4.5 L0,9 z" fill="#4a5f58"/>
+    </marker>
+  </defs>
+
+  <rect width="1120" height="660" fill="#fbfdfb"/>
+  <rect x="1" y="1" width="1118" height="658" rx="18" fill="none" stroke="#e2ebe5"/>
+
+  <text x="48" y="42" font-size="19" font-weight="700" fill="#18332f">Phase 6 · L2 并发地图：50 个请求会堵在哪</text>
+  <text x="48" y="68" font-size="12.5" fill="#6b7f78">这个系统是 I/O 密集型：大部分时间在等模型、等检索、等磁盘；瓶颈通常不在计算。</text>
+
+  <!-- 五个阶段 -->
+  <rect x="47" y="112" width="170" height="86" rx="11" fill="#eef2ef" stroke="#dbe4de"/>
+  <text x="132" y="144" font-size="15" font-weight="700" fill="#3d4f47" text-anchor="middle">50 个并发请求</text>
+  <text x="132" y="167" font-size="12" fill="#6b7f78" text-anchor="middle">同时在途，不是 50 QPS</text>
+
+  <rect x="261" y="112" width="170" height="86" rx="11" fill="#e7f1eb" stroke="#cfe2d7"/>
+  <text x="346" y="144" font-size="15" font-weight="700" fill="#2f6f57" text-anchor="middle">① 事件循环</text>
+  <text x="346" y="167" font-size="12" fill="#5c7369" text-anchor="middle">1 条线程，协作式调度</text>
+
+  <rect x="475" y="112" width="170" height="86" rx="11" fill="#e9f0f6" stroke="#d2e0ea"/>
+  <text x="560" y="144" font-size="15" font-weight="700" fill="#3f657d" text-anchor="middle">② 线程池</text>
+  <text x="560" y="167" font-size="12" fill="#5c727f" text-anchor="middle">默认 max ≈ 32</text>
+
+  <rect x="689" y="112" width="170" height="86" rx="11" fill="#f5ece4" stroke="#e8d8c9"/>
+  <text x="774" y="144" font-size="15" font-weight="700" fill="#8a5a3b" text-anchor="middle">③ 模型调用</text>
+  <text x="774" y="167" font-size="12" fill="#7a6353" text-anchor="middle">每次 4–5 秒网络等待</text>
+
+  <rect x="903" y="112" width="170" height="86" rx="11" fill="#f3ecf0" stroke="#e3d3dc"/>
+  <text x="988" y="144" font-size="15" font-weight="700" fill="#7a4a63" text-anchor="middle">④ SQLite</text>
+  <text x="988" y="167" font-size="12" fill="#7d6572" text-anchor="middle">单写者，写操作串行</text>
+
+  <!-- 阶段之间的箭头 -->
+  <line x1="217" y1="155" x2="249" y2="155" stroke="#4a5f58" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <line x1="431" y1="155" x2="463" y2="155" stroke="#4a5f58" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <line x1="645" y1="155" x2="677" y2="155" stroke="#4a5f58" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <line x1="859" y1="155" x2="891" y2="155" stroke="#4a5f58" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- 瓶颈说明卡 -->
+  <rect x="47" y="228" width="170" height="108" rx="10" fill="#f7faf8" stroke="#e2ebe5"/>
+  <text x="132" y="253" font-size="11.5" fill="#7d9189" text-anchor="middle">请求本身不是瓶颈</text>
+  <text x="132" y="276" font-size="11.5" fill="#7d9189" text-anchor="middle">它们只是在等下面四关</text>
+  <text x="132" y="310" font-size="11.5" fill="#7d9189" text-anchor="middle">连接与内存要有上限</text>
+
+  <rect x="261" y="228" width="170" height="108" rx="10" fill="#fff8ee" stroke="#f0dfc8"/>
+  <text x="346" y="250" font-size="11.5" font-weight="700" fill="#a5672f" text-anchor="middle">同步调用直接跑</text>
+  <text x="346" y="272" font-size="11.5" fill="#8a6a4a" text-anchor="middle">整个循环被卡住</text>
+  <text x="346" y="300" font-size="11" fill="#a58a72" text-anchor="middle">get_state / graph.stream</text>
+  <text x="346" y="320" font-size="11" fill="#a58a72" text-anchor="middle">都不能直接放在 async 里</text>
+
+  <rect x="475" y="228" width="170" height="108" rx="10" fill="#fff8ee" stroke="#f0dfc8"/>
+  <text x="560" y="250" font-size="11.5" font-weight="700" fill="#a5672f" text-anchor="middle">模型请求占着线程等网络</text>
+  <text x="560" y="272" font-size="11.5" fill="#8a6a4a" text-anchor="middle">第 33 个开始排队</text>
+  <text x="560" y="300" font-size="11" fill="#a58a72" text-anchor="middle">线程数不是免费资源</text>
+  <text x="560" y="320" font-size="11" fill="#a58a72" text-anchor="middle">异步客户端能释放线程</text>
+
+  <rect x="689" y="228" width="170" height="108" rx="10" fill="#fff8ee" stroke="#f0dfc8"/>
+  <text x="774" y="250" font-size="11.5" font-weight="700" fill="#a5672f" text-anchor="middle">provider 限流 / 429</text>
+  <text x="774" y="272" font-size="11.5" fill="#8a6a4a" text-anchor="middle">重试会放大并发</text>
+  <text x="774" y="300" font-size="11" fill="#a58a72" text-anchor="middle">并发越高，重试风暴越大</text>
+  <text x="774" y="320" font-size="11" fill="#a58a72" text-anchor="middle">需要信号量 + 退避</text>
+
+  <rect x="903" y="228" width="170" height="108" rx="10" fill="#fff8ee" stroke="#f0dfc8"/>
+  <text x="988" y="250" font-size="11.5" font-weight="700" fill="#a5672f" text-anchor="middle">database is locked</text>
+  <text x="988" y="272" font-size="11.5" fill="#8a6a4a" text-anchor="middle">同会话写会互相覆盖</text>
+  <text x="988" y="300" font-size="11" fill="#a58a72" text-anchor="middle">换成 async 驱动也不解决</text>
+  <text x="988" y="320" font-size="11" fill="#a58a72" text-anchor="middle">单写者不变量没变</text>
+
+  <!-- 底部结论 -->
+  <rect x="47" y="370" width="1026" height="196" rx="14" fill="#f4f8f5" stroke="#dbe8df"/>
+  <text x="76" y="404" font-size="14" font-weight="700" fill="#2f6f57">L2 要回答的三个问题</text>
+  <text x="76" y="436" font-size="13" fill="#3d5c50">1. 哪些等待能换成 async？——路由、模型客户端、检索</text>
+  <text x="76" y="466" font-size="13" fill="#3d5c50">2. 哪一层必须串行？——同一个 session 的 checkpoint 写</text>
+  <text x="76" y="496" font-size="13" fill="#3d5c50">3. SQLite 够不够？——WAL / 连接策略 / 换 Postgres</text>
+
+  <line x1="620" y1="392" x2="620" y2="540" stroke="#dbe8df" stroke-width="1.2"/>
+
+  <text x="652" y="404" font-size="14" font-weight="700" fill="#3f657d">验收与边界</text>
+  <text x="652" y="436" font-size="13" fill="#3d5c50">50 并发下 5xx = 0，错误率 &lt; 1%</text>
+  <text x="652" y="466" font-size="13" fill="#3d5c50">p50 / p95 / 吞吐 / 锁等待都要有记录</text>
+  <text x="652" y="496" font-size="13" fill="#3d5c50">429 限流属于 L3，不在本课硬做</text>
+
+  <text x="560" y="602" font-size="13" fill="#6b7f78" text-anchor="middle">async 不缩短单个请求，只让“等待”不占线程；真正的吞吐来自减少串行和选对存储。</text>
+  <text x="560" y="628" font-size="12" fill="#93a79c" text-anchor="middle">先测基线，再改一个变量，再复测——没有数字的优化不做。</text>
+</svg>

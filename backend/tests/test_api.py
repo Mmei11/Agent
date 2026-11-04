@@ -13,13 +13,9 @@ client = TestClient(app)
 def isolated_database(tmp_path, monkeypatch):
     """API 测试不写入本地演示用的 consultations.sqlite。"""
     monkeypatch.setenv("CONSULTATION_DB_PATH", str(tmp_path / "consultations.sqlite"))
-    routes._compiled_app = None
-    routes._saver = None
+    routes.reset_app()
     yield
-    if routes._saver is not None:
-        routes._saver.conn.close()
-    routes._compiled_app = None
-    routes._saver = None
+    routes.reset_app()
 
 
 @pytest.fixture(autouse=True)

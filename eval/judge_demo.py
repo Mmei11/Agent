@@ -34,8 +34,7 @@ LABELS = {
 def run_case(case: dict, client: TestClient, db_path: Path) -> dict:
     """用 API 跑完一条案例，返回 graph 里的完整状态。"""
     os.environ["CONSULTATION_DB_PATH"] = str(db_path)
-    routes._saver = None
-    routes._compiled_app = None
+    routes.reset_app()
     # 与 run_eval 保持一致：故障案例用信息完整的固定输入，才能走到工具节点。
     input_turns = list(case["input_turns"])
     if case["category"] == "tool_failure":
@@ -124,10 +123,7 @@ def main() -> int:
             os.environ.pop("USE_MODEL", None)
         else:
             os.environ["USE_MODEL"] = original
-        if routes._saver is not None:
-            routes._saver.conn.close()
-        routes._saver = None
-        routes._compiled_app = None
+        routes.reset_app()
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(

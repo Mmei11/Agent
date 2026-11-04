@@ -208,10 +208,7 @@ def repeat(
             os.environ.pop("USE_MODEL", None)
         else:
             os.environ["USE_MODEL"] = original_use_model
-        if routes._saver is not None:
-            routes._saver.conn.close()
-        routes._saver = None
-        routes._compiled_app = None
+        routes.reset_app()
 
     case_runs_jsonl = output_dir / "repeat-runs.jsonl"
     case_runs_jsonl.write_text(

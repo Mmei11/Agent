@@ -1,11 +1,13 @@
 """Day 14：问诊 Agent 的 FastAPI 接口。案例均为虚构，不涉及真实诊疗。"""
 
 import asyncio
+import contextvars
 import json
 import logging
 import os
-import sqlite3  # 创建 SQLite 连接给 SqliteSaver
+import threading
 import uuid  # 生成会话 ID（UUID 随机字符串）
+from concurrent.futures import ThreadPoolExecutor
 
 from fastapi import FastAPI, HTTPException  # FastAPI 框架和 HTTP 错误响应
 from pydantic import BaseModel  # 定义请求和响应的数据结构
@@ -15,7 +17,7 @@ from backend.app.agent.graph import build_graph  # 组装 LangGraph 状态图
 from backend.app.config import load_env_file  # 统一读取 .env
 from backend.app.observability import start_trace  # 一次请求 = 一条 trace
 from backend.app.observability.instrument import summarize_node_result  # 节点摘要白名单
-from backend.app.storage.saver import DEFAULT_DB_PATH  # SQLite 文件默认路径
+from backend.app.storage.saver import DEFAULT_DB_PATH, create_saver  # SQLite saver
 
 logger = logging.getLogger(__name__)
 
@@ -31,28 +33,87 @@ app = FastAPI(
     description="仅面向虚构模拟病例的求职演示。不提供真实医疗诊断、治疗或用药指导。",
 )
 
-# 全局变量：所有请求共享同一个 saver 和编译后的图
-# 不能每次请求新建，否则不同请求看不到彼此的会话状态
+# 图是同步的（SqliteSaver 没有异步接口），所以给图单独一个线程池，
+# 不跟 FastAPI 的 anyio 线程池抢名额。线程数就是"同时在跑的图"的上限。
+_executor: ThreadPoolExecutor | None = None
+_executor_lock = threading.Lock()
+
+# 共享一个 saver 和编译后的图。
+#
+# WHY 不每线程一个连接：L2 实测过每线程连接 + WAL + 64 线程，
+# p50 从 250ms 降到 130ms，但 p95 从 400ms 涨到 1050ms——50 个线程
+# 同时写 SQLite，busy_timeout 等待把尾部拉长。SqliteSaver 内部本来
+# 就有一把 threading.Lock，它天然起到"数据库访问排队"的作用，
+# 在本项目这个量级下反而让尾延迟更可预测。
 _saver = None
 _compiled_app = None
+_app_path: str | None = None
+_app_lock = threading.Lock()
+
+
+def _get_executor() -> ThreadPoolExecutor:
+    global _executor
+    if _executor is None:
+        with _executor_lock:
+            if _executor is None:
+                load_env_file()
+                workers = os.getenv("GRAPH_MAX_WORKERS")
+                if not workers:
+                    # mock 模式是 CPU 密集：线程越多，GIL 竞争越重，8 个左右尾延迟最好。
+                    # 模型模式是 I/O 密集：线程大部分时间在等网络，64 个能撑住 50 并发。
+                    workers = "64" if os.getenv("USE_MODEL") == "1" else "8"
+                _executor = ThreadPoolExecutor(
+                    max_workers=int(workers), thread_name_prefix="graph"
+                )
+    return _executor
+
+
+async def _run_sync(fn, *args):
+    """把同步函数丢进图线程池，并保留当前 ContextVar（trace 依赖它）。"""
+    context = contextvars.copy_context()
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(_get_executor(), context.run, fn, *args)
 
 
 def get_app():
-    """懒加载编译后的图。第一次调用时创建 saver 和图。
+    """返回编译后的图；数据库路径变化时重建（测试会切临时库）。"""
+    global _saver, _compiled_app, _app_path
 
-    懒加载 = 不在模块加载时就创建，而是第一次有人调时才创建。
-    这样测试里不会因为 import 就连数据库。
-    """
-    global _saver, _compiled_app
-    if _compiled_app is None:  # 还没创建过
-        load_env_file()
-        from langgraph.checkpoint.sqlite import SqliteSaver
+    load_env_file()
+    path = os.getenv("CONSULTATION_DB_PATH", DEFAULT_DB_PATH)
 
-        # 创建 SQLite 连接，check_same_thread=False 允许多线程共享连接
-        conn = sqlite3.connect(os.getenv("CONSULTATION_DB_PATH", DEFAULT_DB_PATH), check_same_thread=False)
-        _saver = SqliteSaver(conn)  # 用这个连接创建 checkpointer
-        _compiled_app = build_graph(checkpointer=_saver)  # 编译图时传入 checkpointer
-    return _compiled_app
+    with _app_lock:
+        if _compiled_app is None or _app_path != path:
+            if _saver is not None:
+                _close_saver(_saver)
+            _saver = create_saver(path)
+            _compiled_app = build_graph(checkpointer=_saver)
+            _app_path = path
+        return _compiled_app
+
+
+def _current_saver():
+    get_app()
+    with _app_lock:
+        return _saver
+
+
+def _close_saver(saver) -> None:
+    try:
+        saver.conn.close()
+    except Exception:
+        pass
+
+
+def reset_app() -> None:
+    """关闭当前 saver 并清空缓存；测试在切换临时库时调用。"""
+    global _saver, _compiled_app, _app_path
+    with _app_lock:
+        if _saver is not None:
+            _close_saver(_saver)
+        _saver = None
+        _compiled_app = None
+        _app_path = None
 
 
 # --- 请求和响应 schema ---
@@ -93,35 +154,41 @@ class SessionResponse(BaseModel):
     conversation: list = []  # 完整对话，随检查点保存
 
 
-# --- 四个接口 ---
+# --- 五个接口 ---
 
 @app.post("/sessions", response_model=SessionResponse)
-def create_session(req: CreateSessionRequest):
+async def create_session(req: CreateSessionRequest):
     """创建新会话。如果传了 initial_message，立即处理。
 
     流程：生成 session_id → 如果有消息就调图处理 → 返回状态。
     """
     session_id = str(uuid.uuid4())  # 生成随机会话 ID，如 "a3f2b1c4-..."
+    values = await _run_sync(_create_session_sync, session_id, req.initial_message)
+    return _to_response(session_id, values)
 
-    if req.initial_message.strip():  # 有消息（去掉首尾空格后非空）
-        graph = get_app()  # 获取编译后的图
-        config = {"configurable": {"thread_id": session_id}}  # 用 session_id 作为 thread_id
+
+def _create_session_sync(session_id: str, initial_message: str) -> dict:
+    """在工作线程里建会话；同一线程内的 saver 负责写入。"""
+    graph = get_app()
+    config = {"configurable": {"thread_id": session_id}}
+    message = initial_message.strip()
+
+    if message:
         # 新会话的第一轮；trace 在这里开启，图内的节点 span 都挂在它下面。
         with start_trace(session_id, turn_id=1):
-            graph.invoke(  # 调图处理用户消息
-                {"latest_user_message": req.initial_message, "session_id": session_id},
-                config=config,  # 传 config 让 checkpointer 按 thread_id 存档
+            graph.invoke(
+                {"latest_user_message": message, "session_id": session_id},
+                config=config,
             )
-        return _get_state(session_id)  # 从 checkpointer 读回状态返回
     else:
         # 空会话也落盘，确保返回的 ID 随后能 GET 和发送消息。
-        graph = get_app()
-        graph.update_state({"configurable": {"thread_id": session_id}}, {"session_id": session_id})
-        return _get_state(session_id)
+        graph.update_state(config, {"session_id": session_id})
+
+    return _read_values(graph, config)
 
 
 @app.post("/sessions/{session_id}/messages", response_model=SessionResponse)
-def send_message(session_id: str, req: SendMessageRequest):
+async def send_message(session_id: str, req: SendMessageRequest):
     """向已有会话发送消息，返回处理后的状态。
 
     session_id 从 URL 路径取，如 POST /sessions/a3f2b1c4/messages。
@@ -130,15 +197,20 @@ def send_message(session_id: str, req: SendMessageRequest):
     if not message:  # 空消息
         raise HTTPException(status_code=400, detail="消息不能为空")  # 400 Bad Request
 
-    graph, config, turn_id = _prepare_turn(session_id)
+    values = await _run_sync(_run_turn_sync, session_id, message)
+    return _to_response(session_id, values)
+
+
+def _run_turn_sync(session_id: str, message: str) -> dict:
+    """前置检查 + 调图放在同一个线程里，保证用的是同一个 saver 连接。"""
+    config, turn_id = _prepare_turn_sync(session_id)
+    graph = get_app()
 
     with start_trace(session_id, turn_id=turn_id):
-        result = graph.invoke(  # 调图处理消息，checkpointer 自动恢复之前的 state
+        return graph.invoke(  # checkpointer 自动恢复之前的 state
             {"latest_user_message": message, "session_id": session_id},
             config=config,
         )
-
-    return _to_response(session_id, result)
 
 
 @app.post("/sessions/{session_id}/stream")
@@ -152,10 +224,10 @@ async def stream_message(session_id: str, req: SendMessageRequest):
     if not message:
         raise HTTPException(status_code=400, detail="消息不能为空")
 
-    graph, config, turn_id = _prepare_turn(session_id)
+    config, turn_id = await _run_sync(_prepare_turn_sync, session_id)
 
     return EventSourceResponse(
-        _event_stream(graph, config, session_id, message, turn_id),
+        _event_stream(config, session_id, message, turn_id),
         headers={
             # 代理不能缓冲，否则事件会被攒到整轮结束才发出去。
             "Cache-Control": "no-cache",
@@ -164,14 +236,14 @@ async def stream_message(session_id: str, req: SendMessageRequest):
     )
 
 
-async def _event_stream(graph, config: dict, session_id: str, message: str, turn_id: int):
+async def _event_stream(config: dict, session_id: str, message: str, turn_id: int):
     """把 worker 线程产出的事件转成 SSE 帧。
 
     图在 worker 线程里跑：同步的 SqliteSaver 不需要异步改造，
     而 start_trace 也在同一个线程里开合，trace 生命周期与连接解耦。
     """
     queue: asyncio.Queue = asyncio.Queue()
-    task = asyncio.create_task(_stream_turn(graph, config, session_id, message, turn_id, queue))
+    task = asyncio.create_task(_stream_turn(config, session_id, message, turn_id, queue))
     _background_tasks.add(task)
     task.add_done_callback(_on_background_done)
 
@@ -189,11 +261,11 @@ async def _event_stream(graph, config: dict, session_id: str, message: str, turn
             logger.info("stream client disconnected; turn %s/%s continues", session_id, turn_id)
 
 
-async def _stream_turn(graph, config: dict, session_id: str, message: str, turn_id: int, queue: asyncio.Queue):
+async def _stream_turn(config: dict, session_id: str, message: str, turn_id: int, queue: asyncio.Queue):
     """在线程里跑图，把节点事件推回事件循环。
 
-    asyncio.to_thread 会复制当前 ContextVar，因此在 worker 里 start_trace
-    依然能让节点埋点拿到同一条 trace。
+    图对象在 work 内部获取：每个线程有自己的 saver，图必须在同一个
+    线程里创建和使用，不能从请求线程传过来。
     """
     loop = asyncio.get_running_loop()
 
@@ -204,6 +276,7 @@ async def _stream_turn(graph, config: dict, session_id: str, message: str, turn_
     def work() -> None:
         with start_trace(session_id, turn_id=turn_id) as scope:
             try:
+                graph = get_app()
                 push(
                     "meta",
                     {"session_id": session_id, "turn_id": turn_id, "trace_id": scope.trace_id},
@@ -237,7 +310,7 @@ async def _stream_turn(graph, config: dict, session_id: str, message: str, turn_
             finally:
                 push("__done__", {})
 
-    await asyncio.to_thread(work)
+    await _run_sync(work)
 
 
 def _on_background_done(task: asyncio.Task) -> None:
@@ -250,8 +323,8 @@ def _on_background_done(task: asyncio.Task) -> None:
         logger.warning("stream background task failed: %r", error)
 
 
-def _prepare_turn(session_id: str):
-    """校验会话可继续，返回图、config 和本轮 turn_id。
+def _prepare_turn_sync(session_id: str):
+    """校验会话可继续，返回 config 和本轮 turn_id。
 
     同步接口与流式接口共用同一套前置检查，避免两条路径行为不一致。
     """
@@ -266,24 +339,40 @@ def _prepare_turn(session_id: str):
 
     # turn_id 在进入图之前算好：intake 节点会把 state.turn_id 加一。
     turn_id = int((snapshot.values or {}).get("turn_id", 0)) + 1
-    return graph, config, turn_id
+    return config, turn_id
 
 
 @app.get("/sessions/{session_id}", response_model=SessionResponse)
-def get_session(session_id: str):
+async def get_session(session_id: str):
     """查看会话当前状态，不处理新消息。
 
     前端可以用这个接口刷新页面后恢复会话显示。
     """
-    return _get_state(session_id)  # 从 checkpointer 读状态
+    values = await _run_sync(_read_state_sync, session_id)
+    return _to_response(session_id, values)
+
+
+def _read_state_sync(session_id: str) -> dict:
+    config = {"configurable": {"thread_id": session_id}}
+    return _read_values(get_app(), config)
+
+
+def _read_values(graph, config: dict) -> dict:
+    state = graph.get_state(config)  # 从 SQLite 读回该 thread_id 的状态
+    if state is None or state.values is None or not state.values:
+        raise HTTPException(status_code=404, detail="会话不存在")
+    return state.values
 
 
 @app.delete("/sessions/{session_id}")
-def delete_session(session_id: str):
+async def delete_session(session_id: str):
     """删除这个会话的 SQLite 检查点。"""
-    get_app()
-    _saver.delete_thread(session_id)
+    await _run_sync(_delete_session_sync, session_id)
     return {"session_id": session_id, "status": "deleted"}
+
+
+def _delete_session_sync(session_id: str) -> None:
+    _current_saver().delete_thread(session_id)
 
 
 def _to_response(session_id: str, values: dict) -> SessionResponse:
@@ -301,20 +390,3 @@ def _to_response(session_id: str, values: dict) -> SessionResponse:
         rendered_text=values.get("rendered_text", ""),
         conversation=values.get("conversation", []),
     )
-
-
-def _get_state(session_id: str) -> SessionResponse:
-    """从 checkpointer 读取会话状态。
-
-    这是内部辅助函数，不是接口。create_session 和 get_session 都调它。
-    """
-    graph = get_app()
-    config = {"configurable": {"thread_id": session_id}}
-
-    state = graph.get_state(config)  # 从 SQLite 读回该 thread_id 的状态
-
-    # 不存在的会话：state 为 None 或 values 为空
-    if state is None or state.values is None or not state.values:
-        raise HTTPException(status_code=404, detail="会话不存在")  # 404 Not Found
-
-    return _to_response(session_id, state.values)

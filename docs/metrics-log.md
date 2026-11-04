@@ -197,3 +197,18 @@
 - 延迟（3 轮模型）：首事件 p50 2.9ms / p95 5.1ms；首个进度 p50 18.4ms / p95 22.2ms；完整结果 p50 4498ms / p95 4794ms
 - 说明：本项目输出由结构化结果渲染，不是模型逐字生成；"文本"在 `result` 事件一次到达，打字机是展示层效果，不伪造 token 流
 - 遗留：断线重试可能重复提交一轮（幂等留给 L3 的单会话在途锁）；L2 仍需解决 SQLite 并发写
+
+**2026-11-04 · Phase 6 第 2 课：异步与并发**
+
+- 新增 `eval/load_test.py`：固定并发虚拟用户，支持 `/stream` 与 `/messages`，输出 p50/p95/p99、状态码分布、首事件、rps；5xx + 超时 + 连接错误算失败，4xx/429 单独计数
+- 路由全部改 async；同步图调用经 `_run_sync` 进入专用 `ThreadPoolExecutor`，用 `contextvars.copy_context()` 保留 trace 上下文
+- 线程池默认随负载类型：mock 8、模型 64；`GRAPH_MAX_WORKERS` 可覆盖，compose 已透传
+- SQLite：`create_saver` 统一 WAL + `busy_timeout=5000` + `synchronous=NORMAL`；最终保留共享 saver（`SqliteSaver` 内部 lock 天然限流）
+- 基线（50 并发 × 4 轮，mock，stream）：250 请求，0 5xx，p50 277ms / p95 398ms / 170 rps
+- 每线程连接实验（64 线程）：p50 137ms / p95 894ms / 139 rps；32/16/8 线程 p95 = 894 / 591 / 448ms —— 中位数更好，尾部更差
+- 共享 saver + 线程池扫描：64/32/16/8 线程 p95 = 540/504/475/397ms，rps = 149/155/159/170；mock 下 8 线程最优
+- 模型模式（并发 10 × 2 轮）：10 线程 p95 5.04s、首事件 p50 12.5ms；4 线程 p95 11.88s、首事件 p50 4.57s —— I/O 密集时线程池直接决定排队
+- 最终默认（mock，50 并发）：250 请求，0 5xx，p50 273ms / p95 385ms / 168 rps（与基线持平；mock 是 CPU 密集，异步不改吞吐）
+- 单测：288 passed（新增 `test_concurrency.py`：不同会话并发隔离、trace 唯一）
+- 结论：async 化解决"阻塞占线程"和结构隔离，不解决 CPU 密集与 SQLite 单写者；同会话并发与幂等留给 L3
+- 未做：异步模型客户端（需要图节点整体迁移 async，会连带重构评测与 288 条测试）；Postgres checkpointer（演示规模不划算）

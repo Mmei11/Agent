@@ -30,6 +30,8 @@ ALLOWED_NAMES = {
     # 运行开关
     "USE_MODEL",
     "CONSULTATION_DB_PATH",
+    # Phase 6：图线程池大小（同时在跑的问诊轮次上限）
+    "GRAPH_MAX_WORKERS",
     # Phase 5 安全
     "SAFETY_POLICY_PATH",
     "AUDIT_LOG_PATH",
