@@ -28,13 +28,20 @@ SAFE_KEYS = (
 )
 
 
-def _summarize(result: dict) -> dict:
-    """从节点返回的 trace 摘要里挑出适合放进 span 的字段。"""
+def summarize_node_result(result: dict) -> dict:
+    """从节点返回的 trace 摘要里挑出可以对外展示的安全字段。
+
+    trace 拿不到摘要时返回空字典；调用方不要把整个节点结果直接推给前端。
+    """
+    if not isinstance(result, dict):
+        return {}
     entries = result.get("trace") or []
     if not entries:
         return {}
     entry = entries[0]
-    return {key: entry[key] for key in SAFE_KEYS if key in entry}
+    if not isinstance(entry, dict):
+        return {}
+    return {key: entry.get(key) for key in SAFE_KEYS if key in entry}
 
 
 def traced_node(name: str):
@@ -45,7 +52,7 @@ def traced_node(name: str):
         def wrapper(state, *args, **kwargs):
             with span(name, kind="node") as record:
                 result = fn(state, *args, **kwargs)
-                record.attributes.update(_summarize(result))
+                record.attributes.update(summarize_node_result(result))
                 return result
 
         return wrapper

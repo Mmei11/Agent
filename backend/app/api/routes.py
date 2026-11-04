@@ -1,16 +1,29 @@
 """Day 14：问诊 Agent 的 FastAPI 接口。案例均为虚构，不涉及真实诊疗。"""
 
+import asyncio
+import json
+import logging
 import os
 import sqlite3  # 创建 SQLite 连接给 SqliteSaver
 import uuid  # 生成会话 ID（UUID 随机字符串）
 
 from fastapi import FastAPI, HTTPException  # FastAPI 框架和 HTTP 错误响应
 from pydantic import BaseModel  # 定义请求和响应的数据结构
+from sse_starlette.sse import EventSourceResponse  # Phase 6：服务端发送事件流
 
 from backend.app.agent.graph import build_graph  # 组装 LangGraph 状态图
 from backend.app.config import load_env_file  # 统一读取 .env
 from backend.app.observability import start_trace  # 一次请求 = 一条 trace
+from backend.app.observability.instrument import summarize_node_result  # 节点摘要白名单
 from backend.app.storage.saver import DEFAULT_DB_PATH  # SQLite 文件默认路径
+
+logger = logging.getLogger(__name__)
+
+# 只把这些节点的进度推给前端；图内部的 checkpoint 等事件不对外。
+STREAM_NODES = {"intake", "risk_check", "decision", "followup", "tool", "output"}
+
+# 客户端断开后，后台线程仍要把本轮跑完；这里持有任务引用，避免被垃圾回收。
+_background_tasks: set[asyncio.Task] = set()
 
 # 创建 FastAPI 应用实例，title 和 description 会显示在 Swagger 文档页
 app = FastAPI(
@@ -117,8 +130,133 @@ def send_message(session_id: str, req: SendMessageRequest):
     if not message:  # 空消息
         raise HTTPException(status_code=400, detail="消息不能为空")  # 400 Bad Request
 
+    graph, config, turn_id = _prepare_turn(session_id)
+
+    with start_trace(session_id, turn_id=turn_id):
+        result = graph.invoke(  # 调图处理消息，checkpointer 自动恢复之前的 state
+            {"latest_user_message": message, "session_id": session_id},
+            config=config,
+        )
+
+    return _to_response(session_id, result)
+
+
+@app.post("/sessions/{session_id}/stream")
+async def stream_message(session_id: str, req: SendMessageRequest):
+    """流式处理一条消息，用 SSE 先推进度、最后推完整结果。
+
+    与 /messages 的区别只在传输方式：图仍然完整跑完并落 checkpoint，
+    客户端断开也不会留下半截状态。
+    """
+    message = req.message.strip()
+    if not message:
+        raise HTTPException(status_code=400, detail="消息不能为空")
+
+    graph, config, turn_id = _prepare_turn(session_id)
+
+    return EventSourceResponse(
+        _event_stream(graph, config, session_id, message, turn_id),
+        headers={
+            # 代理不能缓冲，否则事件会被攒到整轮结束才发出去。
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+async def _event_stream(graph, config: dict, session_id: str, message: str, turn_id: int):
+    """把 worker 线程产出的事件转成 SSE 帧。
+
+    图在 worker 线程里跑：同步的 SqliteSaver 不需要异步改造，
+    而 start_trace 也在同一个线程里开合，trace 生命周期与连接解耦。
+    """
+    queue: asyncio.Queue = asyncio.Queue()
+    task = asyncio.create_task(_stream_turn(graph, config, session_id, message, turn_id, queue))
+    _background_tasks.add(task)
+    task.add_done_callback(_on_background_done)
+
+    try:
+        while True:
+            item = await queue.get()
+            event, data = item
+            if event == "__done__":  # worker 已结束
+                break
+            yield {"event": event, "data": json.dumps(data, ensure_ascii=False)}
+    finally:
+        # 客户端断开时不要取消 task：让它跑完并落 checkpoint / 审计。
+        # 队列是无界的，剩余事件留在内存里随任务结束被回收。
+        if not task.done():
+            logger.info("stream client disconnected; turn %s/%s continues", session_id, turn_id)
+
+
+async def _stream_turn(graph, config: dict, session_id: str, message: str, turn_id: int, queue: asyncio.Queue):
+    """在线程里跑图，把节点事件推回事件循环。
+
+    asyncio.to_thread 会复制当前 ContextVar，因此在 worker 里 start_trace
+    依然能让节点埋点拿到同一条 trace。
+    """
+    loop = asyncio.get_running_loop()
+
+    def push(event: str, data: dict) -> None:
+        # 线程安全地把事件交给事件循环；不阻塞 worker。
+        loop.call_soon_threadsafe(queue.put_nowait, (event, data))
+
+    def work() -> None:
+        with start_trace(session_id, turn_id=turn_id) as scope:
+            try:
+                push(
+                    "meta",
+                    {"session_id": session_id, "turn_id": turn_id, "trace_id": scope.trace_id},
+                )
+                payload = {"latest_user_message": message, "session_id": session_id}
+                for chunk in graph.stream(payload, config=config, stream_mode="debug"):
+                    kind = chunk.get("type")
+                    body = chunk.get("payload") or {}
+                    node = body.get("name")
+                    if node not in STREAM_NODES:
+                        continue
+                    if kind == "task":
+                        push("node", {"node": node, "phase": "start"})
+                    elif kind == "task_result":
+                        push(
+                            "node",
+                            {
+                                "node": node,
+                                "phase": "end",
+                                "ok": body.get("error") is None,
+                                "summary": summarize_node_result(body.get("result")),
+                            },
+                        )
+
+                state = graph.get_state(config)
+                push("result", _to_response(session_id, state.values).model_dump())
+            except Exception:
+                # 堆栈只进服务端日志，前端拿到可重试的稳定提示。
+                logger.exception("stream turn failed: %s/%s", session_id, turn_id)
+                push("error", {"detail": "本轮处理失败，请重试", "retryable": True})
+            finally:
+                push("__done__", {})
+
+    await asyncio.to_thread(work)
+
+
+def _on_background_done(task: asyncio.Task) -> None:
+    """后台任务结束时回收引用，并取一次异常避免 "never retrieved" 警告。"""
+    _background_tasks.discard(task)
+    if task.cancelled():
+        return
+    error = task.exception()
+    if error is not None:
+        logger.warning("stream background task failed: %r", error)
+
+
+def _prepare_turn(session_id: str):
+    """校验会话可继续，返回图、config 和本轮 turn_id。
+
+    同步接口与流式接口共用同一套前置检查，避免两条路径行为不一致。
+    """
     graph = get_app()
-    config = {"configurable": {"thread_id": session_id}}  # 同一个 session_id → 恢复之前的会话状态
+    config = {"configurable": {"thread_id": session_id}}
 
     snapshot = graph.get_state(config)
     if snapshot is None or not snapshot.values:
@@ -128,25 +266,7 @@ def send_message(session_id: str, req: SendMessageRequest):
 
     # turn_id 在进入图之前算好：intake 节点会把 state.turn_id 加一。
     turn_id = int((snapshot.values or {}).get("turn_id", 0)) + 1
-    with start_trace(session_id, turn_id=turn_id):
-        result = graph.invoke(  # 调图处理消息，checkpointer 自动恢复之前的 state
-            {"latest_user_message": message, "session_id": session_id},
-            config=config,
-        )
-
-    # 把图返回的 state 打包成 SessionResponse 返回给前端
-    return SessionResponse(
-        session_id=session_id,
-        trace_id=result.get("trace_id", ""),  # 本轮观测 id
-        collected_facts=result.get("collected_facts", {}),  # 已收集字段
-        missing_fields=result.get("missing_fields", []),  # 仍缺失字段
-        asked_questions=result.get("asked_questions", []),  # 追问历史
-        followup_count=result.get("followup_count", 0),  # 追问次数
-        risk_flags=result.get("risk_flags", []),  # 风险标记
-        final_result=result.get("final_result", {}),  # 结构化最终结果
-        rendered_text=result.get("rendered_text", ""),  # 渲染文案
-        conversation=result.get("conversation", []),
-    )
+    return graph, config, turn_id
 
 
 @app.get("/sessions/{session_id}", response_model=SessionResponse)
@@ -166,6 +286,23 @@ def delete_session(session_id: str):
     return {"session_id": session_id, "status": "deleted"}
 
 
+def _to_response(session_id: str, values: dict) -> SessionResponse:
+    """把图的状态字典打包成前端契约，同步、流式和查询接口共用。"""
+    values = values or {}
+    return SessionResponse(
+        session_id=session_id,
+        trace_id=values.get("trace_id", ""),
+        collected_facts=values.get("collected_facts", {}),
+        missing_fields=values.get("missing_fields", []),
+        asked_questions=values.get("asked_questions", []),
+        followup_count=values.get("followup_count", 0),
+        risk_flags=values.get("risk_flags", []),
+        final_result=values.get("final_result", {}),
+        rendered_text=values.get("rendered_text", ""),
+        conversation=values.get("conversation", []),
+    )
+
+
 def _get_state(session_id: str) -> SessionResponse:
     """从 checkpointer 读取会话状态。
 
@@ -180,16 +317,4 @@ def _get_state(session_id: str) -> SessionResponse:
     if state is None or state.values is None or not state.values:
         raise HTTPException(status_code=404, detail="会话不存在")  # 404 Not Found
 
-    values = state.values  # 取出状态字典
-    return SessionResponse(
-        session_id=session_id,
-        trace_id=values.get("trace_id", ""),
-        collected_facts=values.get("collected_facts", {}),  # 用 get 兜底，字段可能不存在
-        missing_fields=values.get("missing_fields", []),
-        asked_questions=values.get("asked_questions", []),
-        followup_count=values.get("followup_count", 0),
-        risk_flags=values.get("risk_flags", []),
-        final_result=values.get("final_result", {}),
-        rendered_text=values.get("rendered_text", ""),
-        conversation=values.get("conversation", []),
-    )
+    return _to_response(session_id, state.values)

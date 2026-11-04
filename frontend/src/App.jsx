@@ -22,6 +22,43 @@ const CASES = [
   },
 ];
 
+// 后端 SSE 事件里的节点名 → 用户可读的进度文案。
+const NODE_LABELS = {
+  intake: "提取关键信息",
+  risk_check: "检查安全边界",
+  decision: "规划下一步",
+  tool: "检索知识库",
+  followup: "生成追问",
+  output: "整理结果",
+};
+
+// 只对刚收到的回复做打字机效果；历史消息直接显示，避免刷新页面时整屏重播。
+function AgentText({ text, animate }) {
+  const [shown, setShown] = useState(animate ? "" : text);
+
+  useEffect(() => {
+    if (!animate) {
+      setShown(text);
+      return;
+    }
+    let index = 0;
+    setShown("");
+    const timer = setInterval(() => {
+      index += 2; // 每次两个字符，中文也能保持流畅
+      setShown(text.slice(0, index));
+      if (index >= text.length) clearInterval(timer);
+    }, 18);
+    return () => clearInterval(timer);
+  }, [text, animate]);
+
+  return (
+    <>
+      {shown}
+      {animate && shown.length < text.length && <span className="caret" />}
+    </>
+  );
+}
+
 // 浏览器只缓存会话 ID 和保存时间。完整对话与问诊状态保存在后端数据库中。
 const SESSION_KEY = "consultation_demo_session";
 const SESSION_TTL = 30 * 60 * 1000;
@@ -66,13 +103,86 @@ async function requestJson(url, options) {
   return data;
 }
 
-// 首条消息通过创建会话接口发送，后续消息走 /messages 接口。
-function createSession(message) {
+// 首条消息先建空会话，再走 /stream；后续消息直接在已有会话上流式处理。
+function createEmptySession() {
   return requestJson("/sessions", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ initial_message: message }),
+    body: JSON.stringify({ initial_message: "" }),
   });
+}
+
+// 把一帧 SSE 文本解析成 {event, data}；注释行是服务端心跳，直接跳过。
+function parseFrame(frame) {
+  let event = "message";
+  let data = null;
+  for (const line of frame.split("\n")) {
+    if (line.startsWith(":")) continue;
+    if (line.startsWith("event:")) event = line.slice(6).trim();
+    else if (line.startsWith("data:")) data = JSON.parse(line.slice(5).trim());
+  }
+  return data ? { event, data } : null;
+}
+
+// 读取 /stream 的 SSE 响应：进度事件交给 onNode，最终结果作为返回值。
+async function streamMessage(sessionId, message, onNode) {
+  const response = await fetch(
+    "/sessions/" + encodeURIComponent(sessionId) + "/stream",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message }),
+    },
+  );
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}));
+    const error = new Error(data.detail || "请求失败，请稍后重试");
+    error.status = response.status;
+    throw error;
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let result = null;
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      // 浏览器可能把 \r\n 拆在两个分片里，统一成 \n 后再找空行分隔。
+      buffer = (buffer + decoder.decode(value, { stream: true })).replace(
+        /\r\n/g,
+        "\n",
+      );
+      let index;
+      while ((index = buffer.indexOf("\n\n")) >= 0) {
+        const frame = parseFrame(buffer.slice(0, index));
+        buffer = buffer.slice(index + 2);
+        if (!frame) continue;
+        if (frame.event === "node") {
+          onNode?.(frame.data);
+        } else if (frame.event === "result") {
+          result = frame.data;
+        } else if (frame.event === "error") {
+          const error = new Error(frame.data.detail || "本轮处理失败，请重试");
+          error.retryable = true;
+          throw error;
+        }
+      }
+    }
+  } catch (streamError) {
+    // 出错时主动断开连接；后端仍会把本轮跑完并落库。
+    try {
+      await reader.cancel();
+    } catch {
+      /* 连接可能已关闭 */
+    }
+    throw streamError;
+  }
+
+  if (!result) throw new Error("连接中断，请重试");
+  return result;
 }
 
 // 重开时尽量清理旧会话；网络故障不阻止用户尝试开启新会话。
@@ -95,6 +205,9 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [restoring, setRestoring] = useState(Boolean(sessionId));
   const [error, setError] = useState("");
+  // 流式期间的当前节点，以及刚收到、需要做打字机效果的消息下标。
+  const [currentNode, setCurrentNode] = useState("");
+  const [animatedIndex, setAnimatedIndex] = useState(-1);
 
   // ref 修改后不会触发渲染：busy 立即拦住重复点击，chatEnd 用于滚动到底部。
   const busy = useRef(false);
@@ -165,10 +278,13 @@ export default function App() {
     setLoading(true);
     setError("");
     setInput("");
+    setCurrentNode("");
+    setAnimatedIndex(-1);
     // 旧会话已有最终结果时，新输入自动成为下一轮独立会话的首条消息。
     const startNew = fresh || hasResult || !sessionId;
     const previousMessages = messages;
     const previousState = state;
+    const previousSessionId = sessionId;
     // 先在界面显示用户消息，减少等待感；失败时会恢复原来的内容。
     if (startNew) {
       setMessages([{ role: "user", text: message }]);
@@ -178,29 +294,34 @@ export default function App() {
       setMessages((items) => [...items, { role: "user", text: message }]);
     }
 
+    // 流式进度：节点开始时更新提示文案，结束事件不改变界面。
+    const onNode = (event) => {
+      if (event.phase === "start") setCurrentNode(event.node);
+    };
+
+    let activeId = startNew ? null : sessionId;
     try {
       let data;
       if (startNew) {
         // 选择预设案例或重新开始后，不能把旧会话的风险状态带到新会话。
         await discardSession(sessionId);
-        data = await createSession(message);
+        activeId = (await createEmptySession()).session_id;
+        setSessionId(activeId);
+        saveSession(activeId);
+        data = await streamMessage(activeId, message, onNode);
       } else {
         try {
-          data = await requestJson(
-            "/sessions/" + encodeURIComponent(sessionId) + "/messages",
-            {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ message }),
-            },
-          );
+          data = await streamMessage(activeId, message, onNode);
         } catch (requestError) {
           // 本地缓存对应的会话已不存在或已结束时，以当前输入创建新会话。
           if (requestError.status !== 404 && requestError.status !== 409)
             throw requestError;
           clearSession();
-          data = await createSession(message);
+          activeId = (await createEmptySession()).session_id;
+          setSessionId(activeId);
+          saveSession(activeId);
           setActiveCase(null);
+          data = await streamMessage(activeId, message, onNode);
         }
       }
       setSessionId(data.session_id);
@@ -208,15 +329,36 @@ export default function App() {
       setState(data);
       // 用后端返回的完整记录替换刚才临时显示的消息，保持前后端一致。
       setMessages(data.conversation || []);
+      setAnimatedIndex(Math.max((data.conversation?.length || 1) - 1, 0));
     } catch (requestError) {
-      // 请求失败：撤销临时消息，并把文字放回输入框，方便用户重试。
-      setMessages(previousMessages);
-      setState(previousState);
+      // 流式连接失败时，后端可能已经把本轮跑完；先尝试从服务端恢复真实状态。
+      let recovered = null;
+      if (activeId) {
+        try {
+          recovered = await requestJson("/sessions/" + encodeURIComponent(activeId));
+        } catch {
+          /* 会话确实不可用，退回本地快照 */
+        }
+      }
+      if (recovered) {
+        setSessionId(activeId);
+        saveSession(activeId);
+        setState(recovered);
+        setMessages(
+          recovered.conversation?.length ? recovered.conversation : previousMessages,
+        );
+      } else {
+        setSessionId(previousSessionId);
+        setMessages(previousMessages);
+        setState(previousState);
+      }
+      // 请求失败：把文字放回输入框，方便用户重试。
       setInput(message);
       setError(requestError.message || "连接失败，请稍后重试。");
     } finally {
       busy.current = false;
       setLoading(false);
+      setCurrentNode("");
     }
   }
 
@@ -366,7 +508,10 @@ export default function App() {
                             : "")
                         }
                       >
-                        {item.text}
+                        <AgentText
+                          text={item.text}
+                          animate={item.role === "agent" && index === animatedIndex}
+                        />
                       </div>
                     </div>
                   </div>
@@ -378,7 +523,9 @@ export default function App() {
                   <div className="avatar agent-avatar">✳</div>
                   <div className="message-content">
                     <div className="message-label">问诊 Agent</div>
-                    <div className="message-bubble typing">正在整理信息…</div>
+                    <div className="message-bubble typing">
+                      正在{NODE_LABELS[currentNode] || "整理信息"}…
+                    </div>
                   </div>
                 </div>
               )}

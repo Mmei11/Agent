@@ -425,6 +425,23 @@ button:disabled {
     color: #648070
 }
 
+/* 流式结果到达后的打字机光标 */
+.message-bubble .caret {
+    display: inline-block;
+    width: 6px;
+    height: 1em;
+    margin-left: 2px;
+    vertical-align: -2px;
+    background: currentColor;
+    animation: caret-blink 1s steps(2) infinite
+}
+
+@keyframes caret-blink {
+    50% {
+        opacity: 0
+    }
+}
+
 .composer-wrap {
     border-top: 1px solid #eef2ee;
     padding: 15px 20px 17px

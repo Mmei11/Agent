@@ -183,3 +183,17 @@
 - 单测：279 passed
 - 模型模式：33/33；104 次调用 / 104,533 输入 + 7,788 输出 token / ¥0.099196 / p50 5.282s / p95 20.566s / max 25.248s
 - 局限：对抗集自写、holdout 非真正盲测；输出层为模式匹配，未引入 LLM 第二意见；p95 比 Phase 3 基线 18.8s 高约 1.7s，落在模型波动内，输出层本身 p95 仅 1.43ms
+
+**2026-11-04 · Phase 6 第 1 课：SSE 流式**
+
+- 新增 `POST /sessions/{session_id}/stream`：事件契约 `meta → node(start/end)* → result`，异常以 `error` 结束；`EventSourceResponse` + `X-Accel-Buffering: no`
+- 图用 `graph.stream(stream_mode="debug")` 在 worker 线程跑：`SqliteSaver` 不支持 async 方法，避免在 L1 引入 `AsyncSqliteSaver` 双连接
+- `start_trace` 在 worker 线程内开合；客户端断开后本轮继续跑完并落 checkpoint / 审计（实测断开后 GET 可见完整结果）
+- 节点事件只带 `instrument.SAFE_KEYS` 白名单摘要，不推完整 state 或用户原话
+- 前端：`fetch` + `ReadableStream` 解析 SSE（EventSource 只支持 GET）；节点进度文案 + 结果打字机；失败后先 GET 恢复真实状态，再决定是否重试
+- nginx `/sessions` 关闭缓冲，`proxy_read_timeout 300s`
+- 单测：280 passed（新增 `test_stream.py` 6 条：事件顺序 / 风险路径 / 404 / 409 / 400 / 旧接口兼容）
+- 延迟（5 轮 mock）：首事件 p50 2.7ms / p95 3.6ms；首个进度 p50 3.3ms / p95 16.7ms；完整结果 p50 7.1ms / p95 25.8ms
+- 延迟（3 轮模型）：首事件 p50 2.9ms / p95 5.1ms；首个进度 p50 18.4ms / p95 22.2ms；完整结果 p50 4498ms / p95 4794ms
+- 说明：本项目输出由结构化结果渲染，不是模型逐字生成；"文本"在 `result` 事件一次到达，打字机是展示层效果，不伪造 token 流
+- 遗留：断线重试可能重复提交一轮（幂等留给 L3 的单会话在途锁）；L2 仍需解决 SQLite 并发写
