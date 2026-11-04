@@ -19,5 +19,8 @@ logs/
 backend/traces/
 eval/results/
 
+# 本地预览配置（端口写死在本机，不提交）
+.claude/launch.json
+
 # macOS 目录元数据
 .DS_Store
