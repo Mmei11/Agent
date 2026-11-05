@@ -14,7 +14,7 @@ from pydantic import BaseModel  # 定义请求和响应的数据结构
 from sse_starlette.sse import EventSourceResponse  # Phase 6：服务端发送事件流
 
 from backend.app.agent.graph import build_graph  # 组装 LangGraph 状态图
-from backend.app.api.auth import require_api_key  # Phase 6 L3：调用方认证
+from backend.app.api.ratelimit import rate_limit  # Phase 6 L3.2：令牌桶限流
 from backend.app.config import load_env_file  # 统一读取 .env
 from backend.app.observability import start_trace  # 一次请求 = 一条 trace
 from backend.app.observability.instrument import summarize_node_result  # 节点摘要白名单
@@ -157,7 +157,7 @@ class SessionResponse(BaseModel):
 
 # --- 五个接口 ---
 
-@app.post("/sessions", response_model=SessionResponse, dependencies=[Depends(require_api_key)])
+@app.post("/sessions", response_model=SessionResponse, dependencies=[Depends(rate_limit)])
 async def create_session(req: CreateSessionRequest):
     """创建新会话。如果传了 initial_message，立即处理。
 
@@ -191,7 +191,7 @@ def _create_session_sync(session_id: str, initial_message: str) -> dict:
 @app.post(
     "/sessions/{session_id}/messages",
     response_model=SessionResponse,
-    dependencies=[Depends(require_api_key)],
+    dependencies=[Depends(rate_limit)],
 )
 async def send_message(session_id: str, req: SendMessageRequest):
     """向已有会话发送消息，返回处理后的状态。
@@ -218,7 +218,7 @@ def _run_turn_sync(session_id: str, message: str) -> dict:
         )
 
 
-@app.post("/sessions/{session_id}/stream", dependencies=[Depends(require_api_key)])
+@app.post("/sessions/{session_id}/stream", dependencies=[Depends(rate_limit)])
 async def stream_message(session_id: str, req: SendMessageRequest):
     """流式处理一条消息，用 SSE 先推进度、最后推完整结果。
 
@@ -350,7 +350,7 @@ def _prepare_turn_sync(session_id: str):
 @app.get(
     "/sessions/{session_id}",
     response_model=SessionResponse,
-    dependencies=[Depends(require_api_key)],
+    dependencies=[Depends(rate_limit)],
 )
 async def get_session(session_id: str):
     """查看会话当前状态，不处理新消息。
@@ -373,7 +373,7 @@ def _read_values(graph, config: dict) -> dict:
     return state.values
 
 
-@app.delete("/sessions/{session_id}", dependencies=[Depends(require_api_key)])
+@app.delete("/sessions/{session_id}", dependencies=[Depends(rate_limit)])
 async def delete_session(session_id: str):
     """删除这个会话的 SQLite 检查点。"""
     await _run_sync(_delete_session_sync, session_id)

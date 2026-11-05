@@ -35,6 +35,14 @@ ALLOWED_NAMES = {
     # Phase 6 L3：鉴权。required 时必须带 X-API-Key；API_KEYS 逗号分隔、支持轮换。
     "AUTH_MODE",
     "API_KEYS",
+    # Phase 6 L3.2：令牌桶限流。按分钟配置速率，突发容量单独配置。
+    "RATE_LIMIT_ENABLED",
+    "RATE_LIMIT_PER_MINUTE",
+    "RATE_BURST",
+    "SESSION_RATE_LIMIT_PER_MINUTE",
+    "SESSION_BURST",
+    "GLOBAL_RATE_LIMIT_PER_MINUTE",
+    "GLOBAL_BURST",
     # Phase 5 安全
     "SAFETY_POLICY_PATH",
     "AUDIT_LOG_PATH",

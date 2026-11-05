@@ -223,3 +223,14 @@
 - 实测（required + test-key）：缺 key 401、错误 key 401、正确 key 200、无 key 流式 401、带 key 流式正常；审计 3 条拒绝事件、原始 key 出现 0 次
 - 边界：浏览器前端不携带 key，公开演示仍用 `AUTH_MODE=off`；API Key 只认证调用方程序，不是用户体系
 - 下一步：L3.2 令牌桶与三维限流
+
+**2026-11-05 · Phase 6 第 3 课 L3.2：令牌桶限流**
+
+- 新增 `backend/app/api/ratelimit.py`：`TokenBucket` / `RateLimiter` / `RateLimitDecision`；时钟可注入（测试推进时间，不 sleep）；内部 `threading.Lock`；每 256 次检查回收空闲桶
+- 三个维度，顺序固定：全局 → 调用方（API Key 摘要，off 模式退回 IP）→ 会话（从路径参数取）；前一层拒绝就不再消耗后一层
+- 429 响应头：`Retry-After`、`X-RateLimit-Limit`、`X-RateLimit-Remaining`；审计 `RL001` 只落调用方标识的短哈希，不落原始 IP / key
+- 默认值：调用方 60 次/分、突发 10；会话 30 次/分、突发 5；全局 600 次/分、突发 100；`RATE_LIMIT_ENABLED` 可整体关闭
+- 单测：309 passed（新增 10 条：突发/补充/容量上限、key 隔离、空闲回收、429 响应头、关闭开关、会话维度、审计脱敏、认证先于限流）
+- 实测：调用方突发 2 → 200/200/429（Retry-After: 1，Limit: 2）；会话突发 1 → 同一会话 200/429，不同会话不受影响
+- 边界：限流状态在进程内，多 worker / 多副本时每进程各算各的；被拒绝的尝试会消耗上游维度令牌；按请求数计，不按 token 数；不信任 `X-Forwarded-For`，代理场景需在网关限流
+- 下一步：L3.3 体积边界、会话在途锁、SSE 连接计数
