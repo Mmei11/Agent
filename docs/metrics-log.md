@@ -234,3 +234,14 @@
 - 实测：调用方突发 2 → 200/200/429（Retry-After: 1，Limit: 2）；会话突发 1 → 同一会话 200/429，不同会话不受影响
 - 边界：限流状态在进程内，多 worker / 多副本时每进程各算各的；被拒绝的尝试会消耗上游维度令牌；按请求数计，不按 token 数；不信任 `X-Forwarded-For`，代理场景需在网关限流
 - 下一步：L3.3 体积边界、会话在途锁、SSE 连接计数
+
+**2026-11-05 · Phase 6 第 3 课 L3.3：资源边界与会话在途锁**
+
+- 新增 `backend/app/api/limits.py`：纯 ASGI 的 `BodySizeLimitMiddleware`（不影响 SSE 流式响应），`Content-Length` 超 32KB 直接 413，chunked 请求在 `receive` 里累计计数；`check_message_length` 限制单条消息 2000 字，超出 422
+- 新增 `backend/app/api/inflight.py`：同一会话在途集合，第二个请求 409；每个调用方的 SSE 连接计数，超限 429；流式请求在后台任务 `finally` 里释放会话与连接名额
+- 路由接线：体积中间件加在最外层；同步发消息和删除会话加会话锁；流式接口先占连接名额再占会话，任务结束统一释放
+- 配置：`MAX_BODY_BYTES`、`MAX_MESSAGE_CHARS`、`MAX_STREAMS_PER_CLIENT`，compose 已透传
+- 单测：318 passed（新增 8 条：413、422、同会话 409、不同会话并行、删除时 409、流结束释放锁、流计数上限、流超限 429）
+- 实测：正常创建 200；40KB body → 413「请求体过大」；2001 字消息 → 422「消息不能超过 2000 字」
+- 边界：会话锁与流计数在进程内，多 worker 时每个进程各一份；chunked body 依赖读取计数，极端情况下应用可能已读取部分 body
+- 下一步：L3.4 观测、审计与带限流的压测收尾

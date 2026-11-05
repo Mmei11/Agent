@@ -43,6 +43,10 @@ ALLOWED_NAMES = {
     "SESSION_BURST",
     "GLOBAL_RATE_LIMIT_PER_MINUTE",
     "GLOBAL_BURST",
+    # Phase 6 L3.3：资源边界。请求体、单条消息、每个调用方的并发流数量。
+    "MAX_BODY_BYTES",
+    "MAX_MESSAGE_CHARS",
+    "MAX_STREAMS_PER_CLIENT",
     # Phase 5 安全
     "SAFETY_POLICY_PATH",
     "AUDIT_LOG_PATH",

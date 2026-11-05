@@ -10,7 +10,7 @@ import os
 import secrets
 from dataclasses import dataclass
 
-from fastapi import Header, HTTPException
+from fastapi import Header, HTTPException, Request
 
 from backend.app.config import load_env_file
 from backend.app.safety.audit import AuditEvent
@@ -54,6 +54,17 @@ def _audit_denial(reason: str, key_hash: str) -> None:
             detail=reason,
         )
     )
+
+
+def caller_key(caller: CallerIdentity, request: Request) -> str:
+    """限流/连接计数用的调用方标识：有 key 用 key 摘要，否则退回 IP。
+
+    只用直连地址，不信任 X-Forwarded-For；代理场景应在网关层限流。
+    """
+    if caller.key_hash:
+        return caller.key_hash
+    host = request.client.host if request.client else "unknown"
+    return f"ip:{host}"
 
 
 def require_api_key(

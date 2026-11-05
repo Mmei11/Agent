@@ -9,11 +9,17 @@ import threading
 import uuid  # 生成会话 ID（UUID 随机字符串）
 from concurrent.futures import ThreadPoolExecutor
 
-from fastapi import Depends, FastAPI, HTTPException  # FastAPI 框架和 HTTP 错误响应
+from fastapi import Depends, FastAPI, HTTPException, Request  # FastAPI 框架和 HTTP 错误响应
 from pydantic import BaseModel  # 定义请求和响应的数据结构
 from sse_starlette.sse import EventSourceResponse  # Phase 6：服务端发送事件流
 
 from backend.app.agent.graph import build_graph  # 组装 LangGraph 状态图
+from backend.app.api import inflight  # Phase 6 L3.3：会话在途与流计数
+from backend.app.api.auth import CallerIdentity, caller_key, require_api_key  # 认证
+from backend.app.api.limits import (  # Phase 6 L3.3：体积与消息长度边界
+    BodySizeLimitMiddleware,
+    check_message_length,
+)
 from backend.app.api.ratelimit import rate_limit  # Phase 6 L3.2：令牌桶限流
 from backend.app.config import load_env_file  # 统一读取 .env
 from backend.app.observability import start_trace  # 一次请求 = 一条 trace
@@ -33,6 +39,9 @@ app = FastAPI(
     title="智能问诊 Agent API",
     description="仅面向虚构模拟病例的求职演示。不提供真实医疗诊断、治疗或用药指导。",
 )
+
+# 体积检查放在最外层：超大 body 在认证、限流、解析之前就被拒绝。
+app.add_middleware(BodySizeLimitMiddleware)
 
 # 图是同步的（SqliteSaver 没有异步接口），所以给图单独一个线程池，
 # 不跟 FastAPI 的 anyio 线程池抢名额。线程数就是"同时在跑的图"的上限。
@@ -164,6 +173,7 @@ async def create_session(req: CreateSessionRequest):
     流程：生成 session_id → 如果有消息就调图处理 → 返回状态。
     """
     session_id = str(uuid.uuid4())  # 生成随机会话 ID，如 "a3f2b1c4-..."
+    check_message_length(req.initial_message)
     values = await _run_sync(_create_session_sync, session_id, req.initial_message)
     return _to_response(session_id, values)
 
@@ -201,8 +211,11 @@ async def send_message(session_id: str, req: SendMessageRequest):
     message = req.message.strip()  # 取消息内容，去首尾空格
     if not message:  # 空消息
         raise HTTPException(status_code=400, detail="消息不能为空")  # 400 Bad Request
+    check_message_length(message)
 
-    values = await _run_sync(_run_turn_sync, session_id, message)
+    # 同一会话一次只跑一轮，防止两个请求同时改同一份 checkpoint。
+    with inflight.session_guard(session_id):
+        values = await _run_sync(_run_turn_sync, session_id, message)
     return _to_response(session_id, values)
 
 
@@ -219,7 +232,12 @@ def _run_turn_sync(session_id: str, message: str) -> dict:
 
 
 @app.post("/sessions/{session_id}/stream", dependencies=[Depends(rate_limit)])
-async def stream_message(session_id: str, req: SendMessageRequest):
+async def stream_message(
+    session_id: str,
+    req: SendMessageRequest,
+    request: Request,
+    caller: CallerIdentity = Depends(require_api_key),
+):
     """流式处理一条消息，用 SSE 先推进度、最后推完整结果。
 
     与 /messages 的区别只在传输方式：图仍然完整跑完并落 checkpoint，
@@ -228,11 +246,41 @@ async def stream_message(session_id: str, req: SendMessageRequest):
     message = req.message.strip()
     if not message:
         raise HTTPException(status_code=400, detail="消息不能为空")
+    check_message_length(message)
 
     config, turn_id = await _run_sync(_prepare_turn_sync, session_id)
 
+    # 先占连接名额，再占会话；任何一步失败都要把前一步释放掉。
+    caller_id = caller_key(caller, request)
+    if not inflight.try_open_stream(caller_id):
+        raise HTTPException(
+            status_code=429,
+            detail="并发流数量超限",
+            headers={"Retry-After": "1"},
+        )
+    if not inflight.try_enter(session_id):
+        inflight.close_stream(caller_id)
+        raise HTTPException(
+            status_code=409,
+            detail="上一轮还在处理，请稍后再试",
+            headers={"Retry-After": "1"},
+        )
+
+    queue: asyncio.Queue = asyncio.Queue()
+    try:
+        task = asyncio.create_task(
+            _stream_turn(config, session_id, message, turn_id, queue, caller_id)
+        )
+    except Exception:
+        inflight.leave(session_id)
+        inflight.close_stream(caller_id)
+        raise
+
+    _background_tasks.add(task)
+    task.add_done_callback(_on_background_done)
+
     return EventSourceResponse(
-        _event_stream(config, session_id, message, turn_id),
+        _event_stream(queue, session_id, turn_id),
         headers={
             # 代理不能缓冲，否则事件会被攒到整轮结束才发出去。
             "Cache-Control": "no-cache",
@@ -241,32 +289,33 @@ async def stream_message(session_id: str, req: SendMessageRequest):
     )
 
 
-async def _event_stream(config: dict, session_id: str, message: str, turn_id: int):
+async def _event_stream(queue: asyncio.Queue, session_id: str, turn_id: int):
     """把 worker 线程产出的事件转成 SSE 帧。
 
-    图在 worker 线程里跑：同步的 SqliteSaver 不需要异步改造，
-    而 start_trace 也在同一个线程里开合，trace 生命周期与连接解耦。
+    任务在路由里已经创建；这里只负责消费队列，客户端断开也不会取消它。
     """
-    queue: asyncio.Queue = asyncio.Queue()
-    task = asyncio.create_task(_stream_turn(config, session_id, message, turn_id, queue))
-    _background_tasks.add(task)
-    task.add_done_callback(_on_background_done)
-
+    finished = False
     try:
         while True:
-            item = await queue.get()
-            event, data = item
+            event, data = await queue.get()
             if event == "__done__":  # worker 已结束
+                finished = True
                 break
             yield {"event": event, "data": json.dumps(data, ensure_ascii=False)}
     finally:
-        # 客户端断开时不要取消 task：让它跑完并落 checkpoint / 审计。
-        # 队列是无界的，剩余事件留在内存里随任务结束被回收。
-        if not task.done():
+        # 客户端断开时 task 继续跑完并落 checkpoint / 审计。
+        if not finished:
             logger.info("stream client disconnected; turn %s/%s continues", session_id, turn_id)
 
 
-async def _stream_turn(config: dict, session_id: str, message: str, turn_id: int, queue: asyncio.Queue):
+async def _stream_turn(
+    config: dict,
+    session_id: str,
+    message: str,
+    turn_id: int,
+    queue: asyncio.Queue,
+    caller_id: str,
+):
     """在线程里跑图，把节点事件推回事件循环。
 
     图对象在 work 内部获取：每个线程有自己的 saver，图必须在同一个
@@ -315,7 +364,12 @@ async def _stream_turn(config: dict, session_id: str, message: str, turn_id: int
             finally:
                 push("__done__", {})
 
-    await _run_sync(work)
+    try:
+        await _run_sync(work)
+    finally:
+        # 任务无论正常结束、异常还是被取消，都要释放会话与连接名额。
+        inflight.leave(session_id)
+        inflight.close_stream(caller_id)
 
 
 def _on_background_done(task: asyncio.Task) -> None:
@@ -376,7 +430,9 @@ def _read_values(graph, config: dict) -> dict:
 @app.delete("/sessions/{session_id}", dependencies=[Depends(rate_limit)])
 async def delete_session(session_id: str):
     """删除这个会话的 SQLite 检查点。"""
-    await _run_sync(_delete_session_sync, session_id)
+    # 有轮次在跑时不允许删除，避免把正在写的 checkpoint 抽走。
+    with inflight.session_guard(session_id):
+        await _run_sync(_delete_session_sync, session_id)
     return {"session_id": session_id, "status": "deleted"}
 
 

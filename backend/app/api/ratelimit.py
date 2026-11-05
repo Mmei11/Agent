@@ -18,7 +18,7 @@ from dataclasses import dataclass
 
 from fastapi import Depends, HTTPException, Request
 
-from backend.app.api.auth import CallerIdentity, require_api_key
+from backend.app.api.auth import CallerIdentity, caller_key, require_api_key
 from backend.app.config import load_env_file
 from backend.app.safety.audit import AuditEvent
 from backend.app.safety.audit import write as write_audit
@@ -198,11 +198,6 @@ def _enabled() -> bool:
     }
 
 
-def _client_ip(request: Request) -> str:
-    """只用直连地址，不信任 X-Forwarded-For；代理场景需要在网关层限流。"""
-    return request.client.host if request.client else "unknown"
-
-
 def _deny(decision: RateLimitDecision, client_id: str) -> HTTPException:
     if math.isfinite(decision.retry_after):
         retry_after = max(1, math.ceil(decision.retry_after))
@@ -251,14 +246,14 @@ async def rate_limit(
     global_limiter, caller_limiter, session_limiter = get_limiters()
 
     # 认证通过后 key_hash 是完整摘要；off 模式为匿名，退回按 IP 分桶。
-    caller_key = caller.key_hash or f"ip:{_client_ip(request)}"
+    caller_id = caller_key(caller, request)
 
     decisions = [global_limiter.check("global")]
     if decisions[-1].allowed:
-        decisions.append(caller_limiter.check(caller_key))
+        decisions.append(caller_limiter.check(caller_id))
     if decisions[-1].allowed and session_id:
         decisions.append(session_limiter.check(session_id))
 
     for decision in decisions:
         if not decision.allowed:
-            raise _deny(decision, caller_key)
+            raise _deny(decision, caller_id)
