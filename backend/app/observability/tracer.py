@@ -232,7 +232,13 @@ def current_trace() -> TraceScope | None:
 
 
 @contextmanager
-def start_trace(session_id: str, turn_id: int, sink: TraceSink | None = None):
+def start_trace(
+    session_id: str,
+    turn_id: int,
+    sink: TraceSink | None = None,
+    root_name: str = "consultation.turn",
+    root_attributes: dict | None = None,
+):
     """开启一轮请求的 trace，退出时自动清理。
 
     用法：
@@ -255,7 +261,9 @@ def start_trace(session_id: str, turn_id: int, sink: TraceSink | None = None):
     try:
         # 每条 trace 有一个根 span，节点和模型调用都挂在它下面。
         # 这样本地报告和 Langfuse 面板看到的都是完整的一棵树。
-        with span("consultation.turn", kind="trace"):
+        with span(root_name, kind="trace") as record:
+            if root_attributes:
+                record.attributes.update(root_attributes)
             yield scope
     finally:
         # 无论正常结束还是异常退出，都要恢复上下文，避免污染后续请求。

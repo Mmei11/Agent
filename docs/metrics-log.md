@@ -245,3 +245,19 @@
 - 实测：正常创建 200；40KB body → 413「请求体过大」；2001 字消息 → 422「消息不能超过 2000 字」
 - 边界：会话锁与流计数在进程内，多 worker 时每个进程各一份；chunked body 依赖读取计数，极端情况下应用可能已读取部分 body
 - 下一步：L3.4 观测、审计与带限流的压测收尾
+
+**2026-11-05 · Phase 6 第 3 课 L3.4：观测、审计与带限流压测**
+
+- 新增 `observability/request_trace.py`：给 `/sessions*` 开请求级 trace（根 span `http.request`），turn trace 通过 `parent.trace_id` 关联
+- 闸门 span：`api.auth`（mode / result / reason / key_id）、`api.rate_limit`（buckets / allowed / denied / retry_after）、`api.session_lock`；标识只落短哈希
+- 审计补齐：会话在途 `IN001`、流数量超限 `IN002`；原有 auth `A001`、限流 `RL001`
+- `eval/load_test.py` 支持 `--api-key`，新增 401 / 409 / 413 / 429 分类计数
+- JSONL 实测：3 个请求产生 3 个 `http.request`、3 个 `api.auth`、2 个 `api.rate_limit`、1 个 `api.session_lock`；`consultation.turn` 带 `parent.trace_id`
+- 压测（50 并发 × 4 轮，stream，mock）：
+  - 无限流：250 请求，0 5xx，p50 346ms / p95 552ms，128 rps
+  - 有限流（burst 60 / 1200 每分钟）：185 个 429，0 5xx；被拒请求快速返回，整体 wall 0.5s
+  - 带 API Key（10 并发 × 2 轮）：30 请求全 2xx，p95 80ms，首事件 p95 55ms
+- 发现：`MAX_STREAMS_PER_CLIENT=5` 按调用方（单 IP）计，50 条并发流会被挡掉大部分；压测需调高。请求级 trace 让 mock p95 从 385ms 升到 552ms，开销记录在案
+- 单测：318 passed
+- L3 验收：401 / 413 / 422 / 409 / 429 均已覆盖；50 并发无 5xx；429 按配置生效
+- 下一步：L4 反馈闭环

@@ -7,6 +7,7 @@
 多 worker / 多副本时每个进程各有一份，文档里写明不是全局约束。
 """
 
+import hashlib
 import os
 import threading
 from contextlib import contextmanager
@@ -14,6 +15,9 @@ from contextlib import contextmanager
 from fastapi import HTTPException
 
 from backend.app.config import load_env_file
+from backend.app.observability.tracer import span
+from backend.app.safety.audit import AuditEvent
+from backend.app.safety.audit import write as write_audit
 
 DEFAULT_MAX_STREAMS_PER_CLIENT = 5
 
@@ -45,19 +49,63 @@ def leave(session_id: str) -> None:
         _sessions.discard(session_id)
 
 
+def _short_hash(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()[:12]
+
+
+def _audit_deny(rule: str, reason: str, identifier: str) -> None:
+    write_audit(
+        AuditEvent(
+            layer="inflight",
+            rule=rule,
+            action="DENY",
+            input_digest=_short_hash(identifier),
+            detail=reason,
+        )
+    )
+
+
 @contextmanager
 def session_guard(session_id: str):
     """非流式接口用：with 块结束时自动释放。"""
-    if not try_enter(session_id):
-        raise HTTPException(
-            status_code=409,
-            detail="上一轮还在处理，请稍后再试",
-            headers={"Retry-After": "1"},
-        )
-    try:
-        yield
-    finally:
-        leave(session_id)
+    with span("api.session_lock", kind="gate") as record:
+        record.attributes["session.id"] = _short_hash(session_id)
+        if not try_enter(session_id):
+            record.attributes["session.allowed"] = False
+            _audit_deny("IN001", "session_busy", session_id)
+            raise HTTPException(
+                status_code=409,
+                detail="上一轮还在处理，请稍后再试",
+                headers={"Retry-After": "1"},
+            )
+        record.attributes["session.allowed"] = True
+        try:
+            yield
+        finally:
+            leave(session_id)
+
+
+def enter_for_stream(session_id: str) -> bool:
+    """流式接口占会话；span 与审计在这里统一处理。"""
+    with span("api.session_lock", kind="gate") as record:
+        record.attributes["session.id"] = _short_hash(session_id)
+        record.attributes["session.stream"] = True
+        allowed = try_enter(session_id)
+        record.attributes["session.allowed"] = allowed
+        if not allowed:
+            _audit_deny("IN001", "session_busy", session_id)
+        return allowed
+
+
+def open_stream(caller_id: str, limit: int | None = None) -> bool:
+    """占一个 SSE 连接名额；超限时写审计。"""
+    with span("api.stream_slot", kind="gate") as record:
+        record.attributes["caller.id"] = _short_hash(caller_id)
+        allowed = try_open_stream(caller_id, limit)
+        record.attributes["stream.allowed"] = allowed
+        if not allowed:
+            _audit_deny("IN002", "stream_limit", caller_id)
+        return allowed
 
 
 def try_open_stream(caller_id: str, limit: int | None = None) -> bool:

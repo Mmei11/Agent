@@ -50,7 +50,6 @@ def _record(records: list[dict], user: int, kind: str, status: int, started: flo
         }
     )
 
-
 async def _run_user(client, base: str, user: int, endpoint: str, turns: int, records: list, failures: list):
     """一个虚拟用户：建会话，然后连续发 turns 轮消息。"""
     try:
@@ -102,10 +101,12 @@ async def run(args) -> dict:
     records: list[dict] = []
     failures: list[dict] = []
     limits = httpx.Limits(max_connections=args.concurrency * 2, max_keepalive_connections=args.concurrency)
+    headers = {"X-API-Key": args.api_key} if args.api_key else {}
 
     async with httpx.AsyncClient(
         limits=limits,
         timeout=httpx.Timeout(args.timeout),
+        headers=headers,
     ) as client:
         if args.warmup:
             await _run_user(client, args.base, -1, args.endpoint, 1, [], [])
@@ -128,6 +129,13 @@ async def run(args) -> dict:
     total = len(records) + len(failures)
     first_events = [record["first_event_ms"] for record in records if record["first_event_ms"]]
 
+    rejection_codes = (401, 409, 413, 429)
+    rejections = {
+        str(code): sum(1 for record in records if record["status"] == code)
+        for code in rejection_codes
+    }
+    rejections = {code: count for code, count in rejections.items() if count}
+
     return {
         "label": args.label,
         "base": args.base,
@@ -137,6 +145,7 @@ async def run(args) -> dict:
         "wall_time_s": round(elapsed, 2),
         "total_requests": total,
         "status_counts": status_counts,
+        "rejections": rejections,
         "network_errors": len(failures),
         "error_rate": round(failures_count / total, 4) if total else 0.0,
         "throughput_rps": round(total / elapsed, 2) if elapsed else 0.0,
@@ -163,6 +172,7 @@ def main() -> None:
     parser.add_argument("--turns", type=int, default=4)
     parser.add_argument("--endpoint", choices=["stream", "messages"], default="stream")
     parser.add_argument("--label", default="baseline")
+    parser.add_argument("--api-key", default="", help="AUTH_MODE=required 时携带的 X-API-Key")
     parser.add_argument("--timeout", type=float, default=120.0)
     parser.add_argument("--warmup", type=int, default=1, help="压测前先跑一个用户热身")
     parser.add_argument("--output", default=str(OUTPUT))

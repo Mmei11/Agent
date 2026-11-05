@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from fastapi import Header, HTTPException, Request
 
 from backend.app.config import load_env_file
+from backend.app.observability.tracer import span
 from backend.app.safety.audit import AuditEvent
 from backend.app.safety.audit import write as write_audit
 
@@ -79,40 +80,54 @@ def require_api_key(
     load_env_file()
     mode = os.getenv("AUTH_MODE", AUTH_MODE_OFF).strip().lower()
 
-    if mode == AUTH_MODE_OFF:
-        return CallerIdentity(mode=AUTH_MODE_OFF)
+    with span("api.auth", kind="gate") as record:
+        record.attributes["auth.mode"] = mode
 
-    if mode != AUTH_MODE_REQUIRED:
-        logger.error("unknown AUTH_MODE=%r; falling back to required", mode)
+        if mode == AUTH_MODE_OFF:
+            record.attributes["auth.result"] = "allow"
+            return CallerIdentity(mode=AUTH_MODE_OFF)
 
-    configured = _configured_keys()
-    if not configured:
-        # 配了 required 却没配 key，是部署错误；宁可拒绝也不能静默放行。
-        logger.error("AUTH_MODE=required but API_KEYS is empty")
-        _audit_denial("auth_not_configured", "")
-        raise HTTPException(status_code=503, detail="认证未配置")
+        if mode != AUTH_MODE_REQUIRED:
+            logger.error("unknown AUTH_MODE=%r; falling back to required", mode)
+            record.attributes["auth.mode_fallback"] = "required"
 
-    if not x_api_key or not x_api_key.strip():
-        _audit_denial("missing_key", "")
-        raise HTTPException(
-            status_code=401,
-            detail="缺少 X-API-Key",
-            headers={"WWW-Authenticate": "ApiKey"},
-        )
+        configured = _configured_keys()
+        if not configured:
+            # 配了 required 却没配 key，是部署错误；宁可拒绝也不能静默放行。
+            logger.error("AUTH_MODE=required but API_KEYS is empty")
+            record.attributes["auth.result"] = "deny"
+            record.attributes["auth.reason"] = "auth_not_configured"
+            _audit_denial("auth_not_configured", "")
+            raise HTTPException(status_code=503, detail="认证未配置")
 
-    provided = _digest(x_api_key.strip())
+        if not x_api_key or not x_api_key.strip():
+            record.attributes["auth.result"] = "deny"
+            record.attributes["auth.reason"] = "missing_key"
+            _audit_denial("missing_key", "")
+            raise HTTPException(
+                status_code=401,
+                detail="缺少 X-API-Key",
+                headers={"WWW-Authenticate": "ApiKey"},
+            )
 
-    # 逐个比较且不提前返回：避免通过响应时间推断匹配到了第几个 key。
-    matched = False
-    for item in configured:
-        matched |= secrets.compare_digest(provided, _digest(item))
+        provided = _digest(x_api_key.strip())
 
-    if not matched:
-        _audit_denial("invalid_key", provided)
-        raise HTTPException(
-            status_code=401,
-            detail="无效的 X-API-Key",
-            headers={"WWW-Authenticate": "ApiKey"},
-        )
+        # 逐个比较且不提前返回：避免通过响应时间推断匹配到了第几个 key。
+        matched = False
+        for item in configured:
+            matched |= secrets.compare_digest(provided, _digest(item))
 
-    return CallerIdentity(mode=AUTH_MODE_REQUIRED, key_hash=provided)
+        if not matched:
+            record.attributes["auth.result"] = "deny"
+            record.attributes["auth.reason"] = "invalid_key"
+            record.attributes["auth.key_id"] = provided[:12]
+            _audit_denial("invalid_key", provided)
+            raise HTTPException(
+                status_code=401,
+                detail="无效的 X-API-Key",
+                headers={"WWW-Authenticate": "ApiKey"},
+            )
+
+        record.attributes["auth.result"] = "allow"
+        record.attributes["auth.key_id"] = provided[:12]
+        return CallerIdentity(mode=AUTH_MODE_REQUIRED, key_hash=provided)

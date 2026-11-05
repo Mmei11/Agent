@@ -20,6 +20,7 @@ from fastapi import Depends, HTTPException, Request
 
 from backend.app.api.auth import CallerIdentity, caller_key, require_api_key
 from backend.app.config import load_env_file
+from backend.app.observability.tracer import span
 from backend.app.safety.audit import AuditEvent
 from backend.app.safety.audit import write as write_audit
 
@@ -254,6 +255,14 @@ async def rate_limit(
     if decisions[-1].allowed and session_id:
         decisions.append(session_limiter.check(session_id))
 
-    for decision in decisions:
-        if not decision.allowed:
-            raise _deny(decision, caller_id)
+    with span("api.rate_limit", kind="gate") as record:
+        record.attributes["rate_limit.buckets"] = [item.name for item in decisions]
+        for decision in decisions:
+            if not decision.allowed:
+                record.attributes["rate_limit.allowed"] = False
+                record.attributes["rate_limit.denied"] = decision.name
+                record.attributes["rate_limit.retry_after"] = round(
+                    decision.retry_after, 3
+                )
+                raise _deny(decision, caller_id)
+        record.attributes["rate_limit.allowed"] = True

@@ -22,8 +22,9 @@ from backend.app.api.limits import (  # Phase 6 L3.3：体积与消息长度边�
 )
 from backend.app.api.ratelimit import rate_limit  # Phase 6 L3.2：令牌桶限流
 from backend.app.config import load_env_file  # 统一读取 .env
-from backend.app.observability import start_trace  # 一次请求 = 一条 trace
+from backend.app.observability import current_trace, start_trace  # 一次请求 = 一条 trace
 from backend.app.observability.instrument import summarize_node_result  # 节点摘要白名单
+from backend.app.observability.request_trace import RequestTraceMiddleware  # 请求级 trace
 from backend.app.storage.saver import DEFAULT_DB_PATH, create_saver  # SQLite saver
 
 logger = logging.getLogger(__name__)
@@ -42,6 +43,14 @@ app = FastAPI(
 
 # 体积检查放在最外层：超大 body 在认证、限流、解析之前就被拒绝。
 app.add_middleware(BodySizeLimitMiddleware)
+# 请求级 trace 包在最外层，认证/限流的 span 才有地方落。
+app.add_middleware(RequestTraceMiddleware)
+
+
+def _parent_trace_attributes() -> dict:
+    """把当前请求 trace 的 id 挂到本轮 turn trace 上，方便串联。"""
+    parent = current_trace()
+    return {"parent.trace_id": parent.trace_id} if parent else {}
 
 # 图是同步的（SqliteSaver 没有异步接口），所以给图单独一个线程池，
 # 不跟 FastAPI 的 anyio 线程池抢名额。线程数就是"同时在跑的图"的上限。
@@ -186,7 +195,9 @@ def _create_session_sync(session_id: str, initial_message: str) -> dict:
 
     if message:
         # 新会话的第一轮；trace 在这里开启，图内的节点 span 都挂在它下面。
-        with start_trace(session_id, turn_id=1):
+        with start_trace(
+            session_id, turn_id=1, root_attributes=_parent_trace_attributes()
+        ):
             graph.invoke(
                 {"latest_user_message": message, "session_id": session_id},
                 config=config,
@@ -224,7 +235,9 @@ def _run_turn_sync(session_id: str, message: str) -> dict:
     config, turn_id = _prepare_turn_sync(session_id)
     graph = get_app()
 
-    with start_trace(session_id, turn_id=turn_id):
+    with start_trace(
+        session_id, turn_id=turn_id, root_attributes=_parent_trace_attributes()
+    ):
         return graph.invoke(  # checkpointer 自动恢复之前的 state
             {"latest_user_message": message, "session_id": session_id},
             config=config,
@@ -252,13 +265,13 @@ async def stream_message(
 
     # 先占连接名额，再占会话；任何一步失败都要把前一步释放掉。
     caller_id = caller_key(caller, request)
-    if not inflight.try_open_stream(caller_id):
+    if not inflight.open_stream(caller_id):
         raise HTTPException(
             status_code=429,
             detail="并发流数量超限",
             headers={"Retry-After": "1"},
         )
-    if not inflight.try_enter(session_id):
+    if not inflight.enter_for_stream(session_id):
         inflight.close_stream(caller_id)
         raise HTTPException(
             status_code=409,
@@ -328,7 +341,9 @@ async def _stream_turn(
         loop.call_soon_threadsafe(queue.put_nowait, (event, data))
 
     def work() -> None:
-        with start_trace(session_id, turn_id=turn_id) as scope:
+        with start_trace(
+            session_id, turn_id=turn_id, root_attributes=_parent_trace_attributes()
+        ) as scope:
             try:
                 graph = get_app()
                 push(
