@@ -67,6 +67,9 @@ class SpanRecord:
     #  "gen_ai.usage.input_tokens": 820,
     #  "risk_level": "safe"}
     error: str | None = None  # 失败时只存异常类型，如 "ValueError"
+    # 这条 trace 的根 span 名；同一 trace 的所有 span 保持一致，
+    # Langfuse 用它给 trace 命名，而不是被最后一个 span 覆盖。
+    trace_name: str = "consultation.turn"
 
     def to_dict(self) -> dict:
         """转成可 JSON 序列化的普通字典，交给 sink 落盘。"""
@@ -198,6 +201,7 @@ class TraceScope:
     session_id: str
     turn_id: int
     sink: TraceSink
+    root_name: str = "consultation.turn"
 
     # 已完成的 span，按“结束时间”排序（子 span 先于父 span 结束）。
     # 它让调用方在 trace 结束后还能拿到整条轨迹，不依赖 sink 是否写成功。
@@ -256,6 +260,7 @@ def start_trace(
         session_id=session_id,
         turn_id=turn_id,
         sink=sink or get_sink(),
+        root_name=root_name,
     )
     token = _current_scope.set(scope)
     try:
@@ -310,6 +315,7 @@ def span(name: str, kind: str = "node", attributes: dict | None = None):
         started_at=_now_iso(),
         ended_at="",       # 结束时才填
         duration_ms=0,     # 结束时才填
+        trace_name=scope.root_name,
         # 复制一份，避免调用方后续修改原字典时，悄悄改掉已经开始的 span 数据。
         attributes=dict(attributes or {}),
     )

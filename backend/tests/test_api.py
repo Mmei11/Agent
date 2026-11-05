@@ -1,5 +1,7 @@
 """Day 14 API 接口测试：创建、发消息、查看、删除。案例均为虚构。"""
 
+import json
+
 from fastapi.testclient import TestClient
 import pytest
 
@@ -182,3 +184,21 @@ def test_conversation_restores_from_sqlite():
     restored = client.get(f"/sessions/{sid}").json()
     assert restored["conversation"] == updated["conversation"]
     assert [item["role"] for item in restored["conversation"]] == ["user", "agent", "user", "agent"]
+
+
+def test_create_session_binds_request_trace_to_new_session(tmp_path, monkeypatch):
+    """POST /sessions 创建后要把新 id 补绑到请求 trace，否则 session 下只剩轮次 trace。"""
+    trace_path = tmp_path / "traces.jsonl"
+    monkeypatch.setenv("TRACE_SINK", "jsonl")
+    monkeypatch.setenv("TRACE_PATH", str(trace_path))
+
+    sid = client.post("/sessions", json={"initial_message": ""}).json()["session_id"]
+
+    rows = [
+        json.loads(line)
+        for line in trace_path.read_text(encoding="utf-8").splitlines()
+    ]
+    roots = [row for row in rows if row["name"] == "http.request"]
+    assert roots
+    assert roots[-1]["session_id"] == sid
+    assert roots[-1]["trace_name"] == "http.request"

@@ -273,3 +273,21 @@
 - 端到端：4 轮点选完成问诊 → 提交 helpful；feedback 行 `turn_id=4`、`trace_id` 与 `scores.jsonl` 一致，本地评分 value=1
 - 边界：反馈只评价当前最新一轮；同一轮重复提交覆盖；Langfuse 未配置，本轮只验证本地 JSONL 路径
 - **Phase 6 完成（L1-L4）**：流式、异步并发、鉴权限流、资源边界、反馈闭环全部落地；下一步 Phase 7 打包与叙事
+
+**2026-11-05 · Langfuse v4 联调（L4 补记）**
+
+- 本地是 events-only 模式：`/api/public/traces` 不可用，trace 走 OTLP 写入 ClickHouse `events_full`
+- 实测会话 `dafad8b8-…`：turn trace 的 `consultation.turn` / `safety.input` / `intake` / `policy` / `risk_check` / `decision` / `followup`，以及请求 trace 的 `http.request` / `api.auth` 均已入库
+- `user_feedback=1` 成功挂到 turn trace；v4 要求 `create_score` 的 `traceId` / `sessionId` 二选一，原实现同时传导致 400，已修复并加单测
+- 新增 `docs/phase6-langfuse-workflow.svg`：采集链路 + 使用闭环
+- 单测：326 passed
+
+**2026-11-05 · Langfuse 会话归属与 trace 命名修复**
+
+- 问题一：`POST /sessions` 创建时请求 trace 被记为 `anonymous`，Session 页只看到轮次 trace；
+  修复：创建出 session_id 后补绑到当前请求 trace 的根 span
+- 问题二：`langfuse.trace.name` 硬编码为 `consultation.turn`，请求 trace 也显示成同名；
+  修复：`SpanRecord.trace_name` 由 `start_trace(root_name=...)` 决定，同一 trace 全部一致
+- 实测新会话 `fc50ecc7-...`：Session 下正确显示 `http.request`（1 span）与 `consultation.turn`（7 span）
+- Session 视图的 “This trace has no messages or tools” 是预期行为：该视图依赖 `gen_ai.input.messages` / `output.messages`，我们为隐私只写 span 元数据，不写对话原文；查看 span 请点 trace 或用 Tracing → Traces
+- 单测：328 passed

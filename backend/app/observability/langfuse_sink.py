@@ -162,7 +162,7 @@ class LangfuseSink:
 
         attributes = {
             "session.id": record.session_id or "anonymous",
-            "langfuse.trace.name": "consultation.turn",
+            "langfuse.trace.name": record.trace_name or "consultation.turn",
             "langfuse.observation.type": observation_type,
             "consultation.turn_id": record.turn_id,
             "consultation.trace_id": record.trace_id,

@@ -86,11 +86,13 @@ def emit_score(
     client = _langfuse_client()
     if client is not None:
         try:
+            # Langfuse v4 要求 traceId / sessionId / datasetRunId 三选一，
+            # 同时传 trace_id 和 session_id 会被 400 拒绝。
             client.create_score(
                 name=name,
                 value=value,
                 trace_id=trace_id or None,
-                session_id=session_id or None,
+                session_id=None if trace_id else (session_id or None),
                 comment=payload["comment"] or None,
                 data_type=data_type,
             )

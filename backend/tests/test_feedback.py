@@ -156,3 +156,25 @@ def test_suggested_replies_follow_the_question():
     # 第二轮应换成下一字段的选项，且不是上一轮的残留。
     assert second["suggested_replies"]
     assert second["suggested_replies"] != first["suggested_replies"]
+
+
+def test_langfuse_score_uses_exactly_one_target(monkeypatch):
+    """Langfuse v4 要求 traceId / sessionId 二选一。"""
+
+    class FakeClient:
+        def __init__(self):
+            self.kwargs = None
+
+        def create_score(self, **kwargs):
+            self.kwargs = kwargs
+
+    fake = FakeClient()
+    monkeypatch.setattr(scores, "_langfuse_client", lambda: fake)
+
+    scores.emit_score("user_feedback", 1, trace_id="trace-1", session_id="session-1")
+    assert fake.kwargs["trace_id"] == "trace-1"
+    assert fake.kwargs["session_id"] is None
+
+    scores.emit_score("user_feedback", 0, trace_id="", session_id="session-1")
+    assert fake.kwargs["trace_id"] is None
+    assert fake.kwargs["session_id"] == "session-1"

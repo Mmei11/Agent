@@ -57,6 +57,20 @@ def _parent_trace_attributes() -> dict:
     parent = current_trace()
     return {"parent.trace_id": parent.trace_id} if parent else {}
 
+
+def _bind_request_trace_session(session_id: str) -> None:
+    """POST /sessions 在请求开始时还没有 id，创建后补绑到请求 trace。
+
+    根 span 在请求结束时才 emit，所以这里改 TraceScope 和被打开 span 的
+    session_id，Langfuse 就能把这条请求 trace 归到新会话下。
+    """
+    scope = current_trace()
+    if scope is None or scope.session_id:
+        return
+    scope.session_id = session_id
+    for record in scope.stack:
+        record.session_id = session_id
+
 # 图是同步的（SqliteSaver 没有异步接口），所以给图单独一个线程池，
 # 不跟 FastAPI 的 anyio 线程池抢名额。线程数就是"同时在跑的图"的上限。
 _executor: ThreadPoolExecutor | None = None
@@ -196,6 +210,7 @@ async def create_session(req: CreateSessionRequest):
     流程：生成 session_id → 如果有消息就调图处理 → 返回状态。
     """
     session_id = str(uuid.uuid4())  # 生成随机会话 ID，如 "a3f2b1c4-..."
+    _bind_request_trace_session(session_id)
     check_message_length(req.initial_message)
     values = await _run_sync(_create_session_sync, session_id, req.initial_message)
     return _to_response(session_id, values)

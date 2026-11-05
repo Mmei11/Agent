@@ -114,3 +114,12 @@ def test_turn_id_and_trace_id_change_per_request_but_session_stays():
     assert {record.session_id for record in sink.records} == {"session-5"}
     # 每条 trace 有根 span + 业务 span，所以 turn_id 各出现两次。
     assert {record.turn_id for record in sink.records} == {1, 2}
+
+def test_trace_name_is_stable_across_spans():
+    sink = MemorySink()
+
+    with start_trace("session-1", 0, sink=sink, root_name="http.request"):
+        with span("api.auth", kind="gate"):
+            pass
+
+    assert {record.trace_name for record in sink.records} == {"http.request"}
