@@ -8,9 +8,10 @@ import os
 import threading
 import uuid  # 生成会话 ID（UUID 随机字符串）
 from concurrent.futures import ThreadPoolExecutor
+from typing import Literal
 
 from fastapi import Depends, FastAPI, HTTPException, Request  # FastAPI 框架和 HTTP 错误响应
-from pydantic import BaseModel  # 定义请求和响应的数据结构
+from pydantic import BaseModel, Field  # 定义请求和响应的数据结构
 from sse_starlette.sse import EventSourceResponse  # Phase 6：服务端发送事件流
 
 from backend.app.agent.graph import build_graph  # 组装 LangGraph 状态图
@@ -22,8 +23,12 @@ from backend.app.api.limits import (  # Phase 6 L3.3：体积与消息长度边�
 )
 from backend.app.api.ratelimit import rate_limit  # Phase 6 L3.2：令牌桶限流
 from backend.app.config import load_env_file  # 统一读取 .env
+from backend.app.feedback import scores as feedback_scores  # Phase 6 L4：反馈评分
+from backend.app.feedback import store as feedback_store  # Phase 6 L4：反馈存储
+from backend.app.feedback.store import FeedbackRecord
 from backend.app.observability import current_trace, start_trace  # 一次请求 = 一条 trace
 from backend.app.observability.instrument import summarize_node_result  # 节点摘要白名单
+from backend.app.observability.redact import redact_text  # 反馈原因脱敏
 from backend.app.observability.request_trace import RequestTraceMiddleware  # 请求级 trace
 from backend.app.storage.saver import DEFAULT_DB_PATH, create_saver  # SQLite saver
 
@@ -155,6 +160,13 @@ class SendMessageRequest(BaseModel):
     message: str  # 必填，没有默认值
 
 
+class FeedbackRequest(BaseModel):
+    """反馈请求：评分 + 可选原因。"""
+
+    rating: Literal["helpful", "unhelpful"]
+    reason: str = Field(default="", max_length=200)
+
+
 class SessionResponse(BaseModel):
     """会话状态响应。所有接口的返回都用这个格式。
 
@@ -167,6 +179,8 @@ class SessionResponse(BaseModel):
     missing_fields: list = []  # 仍缺失的字段名
     asked_questions: list = []  # 已问过的问题列表
     followup_count: int = 0  # 已追问次数
+    turn_id: int = 0  # 当前轮次，反馈提交时用来定位
+    suggested_replies: list = []  # 当前追问的可点选回答
     risk_flags: list = []  # 命中的风险规则
     final_result: dict = {}  # 结构化最终结果
     rendered_text: str = ""  # 给用户直接看的渲染文案
@@ -455,6 +469,49 @@ def _delete_session_sync(session_id: str) -> None:
     _current_saver().delete_thread(session_id)
 
 
+@app.post("/sessions/{session_id}/feedback", dependencies=[Depends(rate_limit)])
+async def submit_feedback(session_id: str, req: FeedbackRequest):
+    """提交本轮反馈；同一会话同一轮重复提交会覆盖。"""
+    return await _run_sync(
+        _save_feedback_sync, session_id, req.rating, req.reason
+    )
+
+
+def _save_feedback_sync(session_id: str, rating: str, reason: str) -> dict:
+    config = {"configurable": {"thread_id": session_id}}
+    values = _read_values(get_app(), config)
+
+    turn_id = int(values.get("turn_id", 0))
+    if turn_id <= 0:
+        raise HTTPException(status_code=409, detail="还没有可评价的轮次")
+
+    trace_id = values.get("trace_id", "")
+    safe_reason = redact_text(reason)[:200]
+    feedback_store.save(
+        FeedbackRecord(
+            session_id=session_id,
+            turn_id=turn_id,
+            rating=rating,
+            reason=safe_reason,
+            trace_id=trace_id,
+        )
+    )
+    # 评分是旁路：Langfuse 不可达时不影响反馈已保存。
+    feedback_scores.emit_score(
+        name="user_feedback",
+        value=1 if rating == "helpful" else 0,
+        trace_id=trace_id,
+        session_id=session_id,
+        comment=safe_reason,
+    )
+    return {
+        "session_id": session_id,
+        "turn_id": turn_id,
+        "rating": rating,
+        "saved": True,
+    }
+
+
 def _to_response(session_id: str, values: dict) -> SessionResponse:
     """把图的状态字典打包成前端契约，同步、流式和查询接口共用。"""
     values = values or {}
@@ -465,6 +522,8 @@ def _to_response(session_id: str, values: dict) -> SessionResponse:
         missing_fields=values.get("missing_fields", []),
         asked_questions=values.get("asked_questions", []),
         followup_count=values.get("followup_count", 0),
+        turn_id=values.get("turn_id", 0),
+        suggested_replies=values.get("suggested_replies", []),
         risk_flags=values.get("risk_flags", []),
         final_result=values.get("final_result", {}),
         rendered_text=values.get("rendered_text", ""),

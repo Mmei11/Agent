@@ -47,6 +47,8 @@ ALLOWED_NAMES = {
     "MAX_BODY_BYTES",
     "MAX_MESSAGE_CHARS",
     "MAX_STREAMS_PER_CLIENT",
+    # Phase 6 L4：反馈评分落盘路径（Langfuse 不可用时也能离线统计）。
+    "SCORE_LOG_PATH",
     # Phase 5 安全
     "SAFETY_POLICY_PATH",
     "AUDIT_LOG_PATH",

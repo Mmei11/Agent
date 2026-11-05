@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 // 预设案例只提供快捷输入文字；实际追问、风险判断和结果都由后端决定。
 const CASES = [
@@ -33,8 +33,13 @@ const NODE_LABELS = {
 };
 
 // 只对刚收到的回复做打字机效果；历史消息直接显示，避免刷新页面时整屏重播。
-function AgentText({ text, animate }) {
+function AgentText({ text, animate, onReveal }) {
   const [shown, setShown] = useState(animate ? "" : text);
+  const revealRef = useRef(onReveal);
+
+  useEffect(() => {
+    revealRef.current = onReveal;
+  }, [onReveal]);
 
   useEffect(() => {
     if (!animate) {
@@ -46,7 +51,13 @@ function AgentText({ text, animate }) {
     const timer = setInterval(() => {
       index += 2; // 每次两个字符，中文也能保持流畅
       setShown(text.slice(0, index));
-      if (index >= text.length) clearInterval(timer);
+      // 文本长高时保持聊天区贴底；每 10 次刷新一次，避免过于频繁。
+      if (index % 10 === 0 || index >= text.length) revealRef.current?.();
+      if (index >= text.length) {
+        clearInterval(timer);
+        // 最后一帧的 DOM 高度在本次回调后才稳定，补一次贴底。
+        setTimeout(() => revealRef.current?.(), 60);
+      }
     }, 18);
     return () => clearInterval(timer);
   }, [text, animate]);
@@ -208,10 +219,19 @@ export default function App() {
   // 流式期间的当前节点，以及刚收到、需要做打字机效果的消息下标。
   const [currentNode, setCurrentNode] = useState("");
   const [animatedIndex, setAnimatedIndex] = useState(-1);
+  // 反馈提交状态："" → submitting → done / error
+  const [feedbackStatus, setFeedbackStatus] = useState("");
 
   // ref 修改后不会触发渲染：busy 立即拦住重复点击，chatEnd 用于滚动到底部。
   const busy = useRef(false);
   const chatEnd = useRef(null);
+
+  // 只滚聊天区，不滚页面；scrollIntoView 会把输入框顶出视口。
+  const scrollChat = useCallback((behavior = "smooth") => {
+    const container = chatEnd.current?.closest(".chat-stream");
+    if (!container) return;
+    container.scrollTo({ top: container.scrollHeight, behavior });
+  }, []);
 
   // 首次进入页面时，用缓存的 ID 从后端恢复完整会话。
   useEffect(() => {
@@ -248,10 +268,10 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // 新消息或“正在整理信息”出现时，让对话视图跟随到底部。
+  // 新消息、选项或“正在整理信息”出现时，只滚动聊天区本身。
   useEffect(() => {
-    chatEnd.current?.scrollIntoView({ behavior: "smooth", block: "end" });
-  }, [messages, loading]);
+    scrollChat("auto");
+  }, [messages, loading, state?.suggested_replies?.length, scrollChat]);
 
   // 下列值都从后端状态推导，供页面展示，不参与后端问诊决策。
   const result = state?.final_result || {};
@@ -259,6 +279,7 @@ export default function App() {
   const isRisk = result.status === "risk_route";
   const facts = Object.entries(state?.collected_facts || {});
   const missing = state?.missing_fields || [];
+  const suggestedReplies = state?.suggested_replies || [];
   // 进度条最多展示 3 次追问；真实次数仍以 state.followup_count 为准。
   const followupCount = Math.min(state?.followup_count || 0, 3);
   const phase = isRisk
@@ -280,6 +301,7 @@ export default function App() {
     setInput("");
     setCurrentNode("");
     setAnimatedIndex(-1);
+    setFeedbackStatus("");
     // 旧会话已有最终结果时，新输入自动成为下一轮独立会话的首条消息。
     const startNew = fresh || hasResult || !sessionId;
     const previousMessages = messages;
@@ -373,6 +395,23 @@ export default function App() {
     setInput("");
     setActiveCase(null);
     setError("");
+    setFeedbackStatus("");
+  }
+
+  // 提交本轮反馈；同一会话同一轮重复提交由后端覆盖。
+  async function submitFeedback(rating) {
+    if (!sessionId || feedbackStatus === "sending" || feedbackStatus === "done") return;
+    setFeedbackStatus("sending");
+    try {
+      await requestJson("/sessions/" + encodeURIComponent(sessionId) + "/feedback", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rating }),
+      });
+      setFeedbackStatus("done");
+    } catch {
+      setFeedbackStatus("error");
+    }
   }
 
   return (
@@ -511,11 +550,27 @@ export default function App() {
                         <AgentText
                           text={item.text}
                           animate={item.role === "agent" && index === animatedIndex}
+                          onReveal={() => scrollChat("auto")}
                         />
                       </div>
                     </div>
                   </div>
                 ))
+              )}
+              {/* 追问的快捷回答：点一下直接发送，输入框仍可自由输入。 */}
+              {!loading && !hasResult && suggestedReplies.length > 0 && (
+                <div className="reply-chips">
+                  {suggestedReplies.map((reply) => (
+                    <button
+                      key={reply}
+                      className="reply-chip"
+                      onClick={() => handleSend(reply)}
+                      disabled={loading || restoring}
+                    >
+                      {reply}
+                    </button>
+                  ))}
+                </div>
               )}
               {/* 等待接口响应时显示临时提示，收到结果后由真实对话替换。 */}
               {loading && (
@@ -652,6 +707,29 @@ export default function App() {
                 {result.tools_used?.length > 0 && (
                   <div className="result-tools">
                     已调用工具：{result.tools_used.join("、")}
+                  </div>
+                )}
+                {feedbackStatus === "done" ? (
+                  <p className="feedback-done">已收到反馈，谢谢</p>
+                ) : (
+                  <div className="feedback-row">
+                    <button
+                      className="feedback-button"
+                      onClick={() => submitFeedback("helpful")}
+                      disabled={feedbackStatus === "sending"}
+                    >
+                      有帮助
+                    </button>
+                    <button
+                      className="feedback-button"
+                      onClick={() => submitFeedback("unhelpful")}
+                      disabled={feedbackStatus === "sending"}
+                    >
+                      没帮助
+                    </button>
+                    {feedbackStatus === "error" && (
+                      <span className="feedback-error">提交失败，稍后重试</span>
+                    )}
                   </div>
                 )}
               </div>

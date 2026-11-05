@@ -716,6 +716,69 @@ button:disabled {
     opacity: .72
 }
 
+.reply-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 4px 0 0 52px
+}
+
+.reply-chip {
+    border: 1px solid #cfe2d7;
+    background: #f1f7f3;
+    color: #3d5c50;
+    border-radius: 999px;
+    padding: 6px 12px;
+    font-size: 12px;
+    cursor: pointer
+}
+
+.reply-chip:hover:not(:disabled) {
+    background: #e3f0e8;
+    border-color: #b9d6c6
+}
+
+.reply-chip:disabled {
+    opacity: .55
+}
+
+.feedback-row {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 14px
+}
+
+.feedback-button {
+    border: 1px solid #d5e2da;
+    background: transparent;
+    color: #3d5c50;
+    border-radius: 999px;
+    padding: 5px 12px;
+    font-size: 11px;
+    cursor: pointer
+}
+
+.feedback-button:hover:not(:disabled) {
+    background: #f1f7f3
+}
+
+.feedback-button:disabled {
+    opacity: .55
+}
+
+.feedback-done {
+    color: #2f6f57;
+    font-size: 11px;
+    margin-top: 12px
+}
+
+.feedback-error {
+    color: #a5483c;
+    font-size: 11px
+}
+
 footer {
     color: #a3b2a6;
     font-size: 10px;

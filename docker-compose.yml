@@ -44,6 +44,7 @@ services:
       MAX_BODY_BYTES: ${MAX_BODY_BYTES:-32768}
       MAX_MESSAGE_CHARS: ${MAX_MESSAGE_CHARS:-2000}
       MAX_STREAMS_PER_CLIENT: ${MAX_STREAMS_PER_CLIENT:-5}
+      SCORE_LOG_PATH: ${SCORE_LOG_PATH:-/data/scores.jsonl}
       DASHSCOPE_API_KEY: ${DASHSCOPE_API_KEY:-}
       DASHSCOPE_MODEL: ${DASHSCOPE_MODEL:-qwen-plus}
       DASHSCOPE_BASE_URL: ${DASHSCOPE_BASE_URL:-https://dashscope.aliyuncs.com/compatible-mode/v1}

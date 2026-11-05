@@ -51,6 +51,9 @@ class ConsultationState(BaseModel):
     # asked_questions：已问过的问题，只增不减
     asked_questions: Annotated[list, operator.add] = []
 
+    # suggested_replies：当前追问的可点选回答，每轮覆盖；收束时清空。
+    suggested_replies: list = []
+
     # --- 追踪与控制 ---
     followup_count: int = 0
     # 连续含糊轮数：命中 vague 时 +1，正常轮重置为 0；供策略层决定何时收束。

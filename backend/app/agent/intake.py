@@ -135,6 +135,8 @@ def intake(state: ConsultationState) -> dict:
         "collected_facts": collected,
         "fact_evidence": evidence,
         "missing_fields": missing,
+        # 新的一轮开始，上一轮的追问选项作废。
+        "suggested_replies": [],
         "final_result": {},
         "rendered_text": "",
         # 只留摘要：字段值已经在 collected_facts 里，这里只记数量与抽取方式。

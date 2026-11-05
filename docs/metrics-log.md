@@ -261,3 +261,15 @@
 - 单测：318 passed
 - L3 验收：401 / 413 / 422 / 409 / 429 均已覆盖；50 并发无 5xx；429 按配置生效
 - 下一步：L4 反馈闭环
+
+**2026-11-05 · Phase 6 第 4 课 L4：反馈闭环**
+
+- 新增 `backend/app/feedback/store.py`：`feedback` 表（`session_id + turn_id` 主键，重复提交覆盖）、`list_for_session`、`stats`
+- 新增 `backend/app/feedback/scores.py`：`user_feedback` 评分，本地 JSONL 必写，Langfuse `create_score` 尽力而为；reason 在入库与评分前统一脱敏
+- 新增 `POST /sessions/{session_id}/feedback`：`rating=helpful|unhelpful` + 可选 reason（≤200 字）；服务端从 state 读取 turn_id / trace_id，不信任客户端；空会话 409、未知会话 404、非法 rating 422
+- 追问快捷选项：state / SessionResponse 增加 `suggested_replies`，followup 按字段给 3 个选项，intake 每轮清空
+- 前端：追问 chips 点选即发送；结果卡“有帮助 / 没帮助”；提交后显示已反馈态
+- 单测：325 passed（新增 7 条：反馈落库与评分、重复覆盖、空会话、未知会话、非法评分、评分脱敏、选项随问题切换）
+- 端到端：4 轮点选完成问诊 → 提交 helpful；feedback 行 `turn_id=4`、`trace_id` 与 `scores.jsonl` 一致，本地评分 value=1
+- 边界：反馈只评价当前最新一轮；同一轮重复提交覆盖；Langfuse 未配置，本轮只验证本地 JSONL 路径
+- **Phase 6 完成（L1-L4）**：流式、异步并发、鉴权限流、资源边界、反馈闭环全部落地；下一步 Phase 7 打包与叙事

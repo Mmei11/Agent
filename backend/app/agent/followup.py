@@ -24,6 +24,17 @@ QUESTION_TEMPLATES = {
 }
 
 
+# 字段对应的追问快捷选项；用户可点选，仍允许自由输入。
+REPLY_OPTIONS = {
+    "主要症状": ["头部不适", "腹痛", "发热"],
+    "持续时间": ["一天内", "两三天", "一周以上"],
+    "部位": ["头部", "腹部", "胸部"],
+    "伴随表现": ["没有其他不适", "有恶心", "有乏力"],
+    "程度": ["轻微", "明显", "严重"],
+    "已知背景": ["无病史", "有慢性病", "正在用药"],
+}
+
+
 def select_next_field(missing_fields: list, asked_questions: list) -> str | None:
     """从缺失字段中选一个还没问过的，按优先级排序。
 
@@ -62,6 +73,7 @@ def followup(state: ConsultationState) -> dict:
         "followup_count": state.followup_count + 1,
         "asked_questions": [question],
         "conversation": [{"role": "agent", "text": question}],
+        "suggested_replies": list(REPLY_OPTIONS.get(field, [])),
         "trace": [
             {
                 "node": "followup",
