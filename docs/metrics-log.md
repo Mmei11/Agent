@@ -212,3 +212,14 @@
 - 单测：288 passed（新增 `test_concurrency.py`：不同会话并发隔离、trace 唯一）
 - 结论：async 化解决"阻塞占线程"和结构隔离，不解决 CPU 密集与 SQLite 单写者；同会话并发与幂等留给 L3
 - 未做：异步模型客户端（需要图节点整体迁移 async，会连带重构评测与 288 条测试）；Postgres checkpointer（演示规模不划算）
+
+**2026-11-05 · Phase 6 第 3 课 L3.1：API Key 认证**
+
+- 新增 `backend/app/api/auth.py`：`require_api_key` 依赖 + `CallerIdentity`（为 L3.2 按调用方限流预留）
+- `AUTH_MODE=off` 放行；`required` 校验 `X-API-Key`；未知模式按 required 处理（fail closed）；required 但 `API_KEYS` 为空返回 503
+- key 启动时计算 SHA-256，逐个 `secrets.compare_digest` 且不提前返回；审计只落摘要前 12 位，不落原文
+- 5 条 `/sessions*` 路由挂认证依赖；`/docs`、`/openapi.json` 不受影响
+- 单测：299 passed（新增 `test_auth.py` 11 条：off/required、缺失/错误/正确、多 key、前缀、未配置、未知模式、全路由保护、审计不泄漏）
+- 实测（required + test-key）：缺 key 401、错误 key 401、正确 key 200、无 key 流式 401、带 key 流式正常；审计 3 条拒绝事件、原始 key 出现 0 次
+- 边界：浏览器前端不携带 key，公开演示仍用 `AUTH_MODE=off`；API Key 只认证调用方程序，不是用户体系
+- 下一步：L3.2 令牌桶与三维限流

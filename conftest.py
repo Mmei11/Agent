@@ -8,6 +8,8 @@ import os
 import tempfile
 
 os.environ.setdefault("KNOWLEDGE_BACKEND", "stub")
+# 测试默认不启用鉴权；test_auth.py 会显式覆盖。
+os.environ.setdefault("AUTH_MODE", "off")
 # 图测试会触发风险审计；写到临时目录，避免污染仓库里的 logs/audit.jsonl。
 os.environ.setdefault(
     "AUDIT_LOG_PATH",

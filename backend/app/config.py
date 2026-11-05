@@ -32,6 +32,9 @@ ALLOWED_NAMES = {
     "CONSULTATION_DB_PATH",
     # Phase 6：图线程池大小（同时在跑的问诊轮次上限）
     "GRAPH_MAX_WORKERS",
+    # Phase 6 L3：鉴权。required 时必须带 X-API-Key；API_KEYS 逗号分隔、支持轮换。
+    "AUTH_MODE",
+    "API_KEYS",
     # Phase 5 安全
     "SAFETY_POLICY_PATH",
     "AUDIT_LOG_PATH",

@@ -1,0 +1,94 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="650" viewBox="0 0 1120 650" font-family="'DM Sans','Noto Sans SC',-apple-system,BlinkMacSystemFont,sans-serif">
+  <defs>
+    <marker id="arrow" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto">
+      <path d="M0,0 L9,4.5 L0,9 z" fill="#4a5f58"/>
+    </marker>
+  </defs>
+
+  <rect width="1120" height="650" fill="#fbfdfb"/>
+  <rect x="1" y="1" width="1118" height="648" rx="18" fill="none" stroke="#e2ebe5"/>
+
+  <text x="48" y="42" font-size="19" font-weight="700" fill="#18332f">Phase 6 · L3 请求闸门：谁在什么时候被拦下</text>
+  <text x="48" y="68" font-size="12.5" fill="#6b7f78">顺序是有意的：先做便宜的检查，再进昂贵的图执行；每个拒绝都有明确的 HTTP 语义。</text>
+
+  <!-- 六个阶段 -->
+  <rect x="40" y="112" width="150" height="84" rx="11" fill="#eef2ef" stroke="#dbe4de"/>
+  <text x="115" y="144" font-size="14" font-weight="700" fill="#3d4f47" text-anchor="middle">请求进入</text>
+  <text x="115" y="168" font-size="11.5" fill="#6b7f78" text-anchor="middle">POST /sessions/…</text>
+
+  <rect x="218" y="112" width="150" height="84" rx="11" fill="#e7f1eb" stroke="#cfe2d7"/>
+  <text x="293" y="144" font-size="14" font-weight="700" fill="#2f6f57" text-anchor="middle">① 体积</text>
+  <text x="293" y="168" font-size="11.5" fill="#5c7369" text-anchor="middle">不解析 JSON</text>
+
+  <rect x="396" y="112" width="150" height="84" rx="11" fill="#e9f0f6" stroke="#d2e0ea"/>
+  <text x="471" y="144" font-size="14" font-weight="700" fill="#3f657d" text-anchor="middle">② 身份</text>
+  <text x="471" y="168" font-size="11.5" fill="#5c727f" text-anchor="middle">X-API-Key</text>
+
+  <rect x="574" y="112" width="150" height="84" rx="11" fill="#f5ece4" stroke="#e8d8c9"/>
+  <text x="649" y="144" font-size="14" font-weight="700" fill="#8a5a3b" text-anchor="middle">③ 频率</text>
+  <text x="649" y="168" font-size="11.5" fill="#7a6353" text-anchor="middle">令牌桶</text>
+
+  <rect x="752" y="112" width="150" height="84" rx="11" fill="#f3ecf0" stroke="#e3d3dc"/>
+  <text x="827" y="144" font-size="14" font-weight="700" fill="#7a4a63" text-anchor="middle">④ 会话在途</text>
+  <text x="827" y="168" font-size="11.5" fill="#7d6572" text-anchor="middle">同会话一次一轮</text>
+
+  <rect x="930" y="112" width="150" height="84" rx="11" fill="#e6efec" stroke="#cfe1da"/>
+  <text x="1005" y="144" font-size="14" font-weight="700" fill="#2f5f55" text-anchor="middle">图线程池</text>
+  <text x="1005" y="168" font-size="11.5" fill="#5c7369" text-anchor="middle">8 / 64 个工位</text>
+
+  <!-- 箭头 -->
+  <line x1="190" y1="154" x2="206" y2="154" stroke="#4a5f58" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <line x1="368" y1="154" x2="384" y2="154" stroke="#4a5f58" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <line x1="546" y1="154" x2="562" y2="154" stroke="#4a5f58" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <line x1="724" y1="154" x2="740" y2="154" stroke="#4a5f58" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <line x1="902" y1="154" x2="918" y2="154" stroke="#4a5f58" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- 拒绝卡 -->
+  <rect x="218" y="226" width="150" height="92" rx="10" fill="#fdf5f2" stroke="#f0d8d2"/>
+  <text x="293" y="252" font-size="13" font-weight="700" fill="#a5483c" text-anchor="middle">413</text>
+  <text x="293" y="276" font-size="11" fill="#8a4b40" text-anchor="middle">body &gt; 32KB</text>
+  <text x="293" y="298" font-size="11" fill="#a58a82" text-anchor="middle">直接拒绝，不解析</text>
+
+  <rect x="396" y="226" width="150" height="92" rx="10" fill="#fdf5f2" stroke="#f0d8d2"/>
+  <text x="471" y="252" font-size="13" font-weight="700" fill="#a5483c" text-anchor="middle">401</text>
+  <text x="471" y="276" font-size="11" fill="#8a4b40" text-anchor="middle">缺少或错误的 key</text>
+  <text x="471" y="298" font-size="11" fill="#a58a82" text-anchor="middle">AUTH_MODE=required 时</text>
+
+  <rect x="574" y="226" width="150" height="92" rx="10" fill="#fdf5f2" stroke="#f0d8d2"/>
+  <text x="649" y="252" font-size="13" font-weight="700" fill="#a5483c" text-anchor="middle">429</text>
+  <text x="649" y="276" font-size="11" fill="#8a4b40" text-anchor="middle">超出桶容量</text>
+  <text x="649" y="298" font-size="11" fill="#a58a82" text-anchor="middle">Retry-After: n 秒</text>
+
+  <rect x="752" y="226" width="150" height="92" rx="10" fill="#fdf5f2" stroke="#f0d8d2"/>
+  <text x="827" y="252" font-size="13" font-weight="700" fill="#a5483c" text-anchor="middle">409</text>
+  <text x="827" y="276" font-size="11" fill="#8a4b40" text-anchor="middle">同一会话已有</text>
+  <text x="827" y="298" font-size="11" fill="#a58a82" text-anchor="middle">一轮在途</text>
+
+  <rect x="930" y="226" width="150" height="92" rx="10" fill="#f7faf8" stroke="#e2ebe5"/>
+  <text x="1005" y="252" font-size="13" font-weight="700" fill="#2f5f55" text-anchor="middle">排队不报错</text>
+  <text x="1005" y="276" font-size="11" fill="#5c7369" text-anchor="middle">超过工位只变慢</text>
+  <text x="1005" y="298" font-size="11" fill="#93a79c" text-anchor="middle">L2 的尾部延迟来源</text>
+
+  <!-- 底部：令牌桶与边界 -->
+  <rect x="40" y="352" width="1040" height="238" rx="14" fill="#f4f8f5" stroke="#dbe8df"/>
+
+  <text x="68" y="386" font-size="14" font-weight="700" fill="#2f6f57">令牌桶：允许突发，限制长期速率</text>
+  <text x="68" y="418" font-size="12.5" fill="#3d5c50">tokens = min(capacity, tokens + elapsed × rate)</text>
+  <text x="68" y="444" font-size="12.5" fill="#3d5c50">每次请求消耗 1 个；不足时拒绝：</text>
+  <text x="68" y="470" font-size="12.5" fill="#3d5c50">Retry-After = ⌈(1 − tokens) ÷ rate⌉ 秒</text>
+  <text x="68" y="508" font-size="12.5" font-weight="700" fill="#2f6f57">三个维度，顺序固定：</text>
+  <text x="68" y="534" font-size="12.5" fill="#3d5c50">全局 → 调用方（key / IP）→ 会话</text>
+  <text x="68" y="560" font-size="11.5" fill="#7d9189">任何一层超限都返回 429；多实例时每进程各算各的。</text>
+
+  <line x1="560" y1="372" x2="560" y2="562" stroke="#dbe8df" stroke-width="1.2"/>
+
+  <text x="592" y="386" font-size="14" font-weight="700" fill="#3f657d">默认边界</text>
+  <text x="592" y="418" font-size="12.5" fill="#3d5c50">请求体上限：32 KB（413）</text>
+  <text x="592" y="444" font-size="12.5" fill="#3d5c50">单条消息：2000 字（422）</text>
+  <text x="592" y="470" font-size="12.5" fill="#3d5c50">单调用方并发流：5 条</text>
+  <text x="592" y="496" font-size="12.5" fill="#3d5c50">限流速率 / 突发容量：可配置</text>
+  <text x="592" y="530" font-size="11.5" fill="#7d9189">所有内存结构都要有上限：桶、在途会话、连接。</text>
+  <text x="592" y="556" font-size="11.5" fill="#7d9189">API Key 只认证调用方程序，不是用户登录体系。</text>
+
+  <text x="560" y="622" font-size="12.5" fill="#6b7f78" text-anchor="middle">先便宜后昂贵：体积 → 身份 → 频率 → 会话 → 图；拒绝要可解释，上限要可测。</text>
+</svg>
