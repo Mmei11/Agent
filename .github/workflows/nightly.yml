@@ -27,6 +27,9 @@ jobs:
       JUDGE_PRICE_INPUT_PER_1K: "0.0024"
       JUDGE_PRICE_OUTPUT_PER_1K: "0.0096"
       TRACE_SINK: none
+      # 评测脚本不经 conftest，显式关闭鉴权与限流，避免 33 条案例被 401/429 拦住。
+      AUTH_MODE: "off"
+      RATE_LIMIT_ENABLED: "0"
       # 夜间跑真实检索：连下面 services 里的 pgvector，而不是 stub。
       KNOWLEDGE_DB_URL: postgresql://postgres:postgres@127.0.0.1:5433/knowledge
     services:

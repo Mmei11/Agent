@@ -105,7 +105,8 @@ def rate_env(tmp_path, monkeypatch):
 
 def test_caller_burst_then_429(monkeypatch):
     monkeypatch.setenv("RATE_BURST", "2")
-    monkeypatch.setenv("RATE_LIMIT_PER_MINUTE", "60")
+    # 补充速率为 0：避免慢 runner 上两次请求间隔超过 1 秒、桶自动回血导致不触发 429。
+    monkeypatch.setenv("RATE_LIMIT_PER_MINUTE", "0")
     ratelimit.reset_limiters()
 
     assert client.post("/sessions", json={"initial_message": ""}).status_code == 200
@@ -168,6 +169,8 @@ def test_session_bucket_is_per_session(monkeypatch):
 
 def test_rate_limit_audit_has_no_raw_ip(monkeypatch, tmp_path):
     monkeypatch.setenv("RATE_BURST", "1")
+    # 同上：不补充令牌，保证第二次请求稳定返回 429 并写审计。
+    monkeypatch.setenv("RATE_LIMIT_PER_MINUTE", "0")
     ratelimit.reset_limiters()
 
     client.post("/sessions", json={"initial_message": ""})

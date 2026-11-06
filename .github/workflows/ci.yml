@@ -21,6 +21,9 @@ jobs:
       USE_MODEL: "0"
       # CI 没有向量库，知识工具用确定性替身跑流程；检索质量由本地评测负责
       KNOWLEDGE_BACKEND: "stub"
+      # 评测脚本不经 conftest，必须显式关掉鉴权与限流，避免脚本被 401/429 拦住。
+      AUTH_MODE: "off"
+      RATE_LIMIT_ENABLED: "0"
     steps:
       - uses: actions/checkout@v7
 
