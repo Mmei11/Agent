@@ -496,6 +496,46 @@ uv run python -m eval.skill_routing
 
 ---
 
+### M11｜general / medical 路由准确率（路由 · 代表“该不该进问诊”）
+
+**定义**：给定一条消息，预路由是否正确判断它应该走 general 还是 medical。
+
+**为什么单独测**：M7 测“选哪个工具”，M9 测“进哪个技能”，但都没覆盖最前面的一步。预路由误判的代价不对称：
+
+- `general` 误判为 `medical`：饮食/寒暄被拉进字段收集，体验明显变差；
+- `medical` 误判为 `general`：可能漏掉症状或风险，代价更高。
+
+**样本**：[eval/probes/router_cases.jsonl](../../eval/probes/router_cases.jsonl)（14 条：10 dev / 4 holdout）
+
+- general：饮食搭配、营养常识、寒暄、情绪、日期、产品、倾诉；
+- medical：症状、药品 + 症状、检查结果、红旗、儿童发热；
+- 边界：进食后出现胃疼 → medical；减肥/晚饭不吃 → general。
+
+**当前基线（2026-11-11，prompt v1，dev 10 条）**
+
+| 类别 | 样本 | 正确 | 准确率 |
+| --- | ---: | ---: | ---: |
+| general | 7 | 5 | 0.714 |
+| medical | 3 | 3 | 1.000 |
+| 全部 | 10 | 8 | 0.800 |
+
+错误样本：RT01（“晚上我吃了一份生菜……健康不？”）和 RT02（“这样的饮食均衡吗”）都被判成 medical。原因是 prompt 把“健康”当成医疗信号，且没有“日常健康管理”的反例。
+
+**修复后（2026-11-11，prompt v2，dev 10 条）**：全部 10/10，general 7/7、medical 3/3；holdout 4/4（含“减肥/晚饭不吃 → general”与“进食后胃疼 → medical”两个边界）。v2 去掉了“健康”这个泛化触发词，明确“饮食/营养/运动/作息算 general，只有出现症状、疾病、药品、检查、治疗或风险才算 medical”。
+
+**目标**：整体 ≥ 0.90，且 **medical 召回 = 1.00**（安全优先）；holdout 阶段末跑。
+
+**端到端验证（Docker，2026-11-11）**：同一条饮食问题返回 general 回答，`final_status` 为空、`followup_count=0`，未进入字段收集。
+
+**测量命令**
+
+```sh
+uv run python -m eval.router_eval
+uv run python -m eval.router_eval --split holdout
+```
+
+---
+
 ## 3. 护栏指标（不参与“变好”判断，但跌破即阻断）
 
 | 指标 | 当前值 | 阈值 |

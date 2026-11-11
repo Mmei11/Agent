@@ -434,3 +434,16 @@
 - 基于当前模型的新基线：v2 ≈ 0.877。
 - v5（纯文本 + 字段归属 guidance）第一次复测 **0.8734**，`伴随表现` 仍 TP=1 / FP=7，未高于 v2；v4 的 0.9057 没有复现，按单次波动处理。**已回退到 v2**，`intake_llm.py` 与提交版无 diff。
 - 最终：intake 保持解析器边界；decision 保留记忆接入；M1 后续以 **0.877** 作为当前模型基线。
+
+**2026-11-11 · M11 general / medical 路由评测**
+
+- 新增 `eval/router_eval.py` + `eval/probes/router_cases.jsonl`（14 条：10 dev / 4 holdout）
+- 样本覆盖饮食搭配、营养常识、寒暄、情绪、日期、产品、倾诉，以及症状、药品、检查、红旗、儿童发热和两个边界案例
+- v1 基线（dev 10 条）：整体 **0.800**；general 0.714、medical 1.000
+- 错误：RT01「晚上我吃了一份生菜……健康不？」、RT02「这样的饮食均衡吗」都被判成 medical
+- 原因：prompt 把“健康”当成医疗信号，且缺少“日常健康管理”的反例
+- 修复：router prompt v2，去掉“健康”泛化触发词，明确饮食/营养/运动/作息算 general；只有症状、疾病、药品、检查、治疗、就医判断或医疗风险才算 medical；先看有没有具体身体不适，没有就 general
+- v2 dev：**1.000**（general 7/7、medical 3/3）；holdout：**1.000**（4/4，含“减肥/晚饭不吃 → general”与“进食后胃疼 → medical”两个边界）
+- 端到端（Docker，`USE_MODEL=1`）：同一条饮食问题返回 general 回答，`final_status` 为空、`followup_count=0`，未进入字段收集
+- 全量：495 tests；33/33 mock；模型模式小回归 E001/E009/E017/E021/E025/E027 **6/6** 通过；Docker backend 已重建为 router v2
+- 单测：新增 router eval 计分 2 条

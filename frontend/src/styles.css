@@ -733,6 +733,88 @@ button:disabled {
     opacity: .72
 }
 
+.memory-button {
+    margin-top: 12px;
+    border: 1px solid #cfe2d7;
+    border-radius: 999px;
+    background: #f1f7f3;
+    color: #2f6f57;
+    padding: 6px 13px;
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background .16s ease, border-color .16s ease
+}
+
+.memory-button:hover:not(:disabled) {
+    background: #e7f2eb;
+    border-color: #b9d8c7
+}
+
+.memory-button:disabled {
+    opacity: .45;
+    cursor: not-allowed
+}
+
+.memory-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 50;
+    display: grid;
+    place-items: center;
+    padding: 24px;
+    background: rgba(14, 42, 35, .38);
+    animation: fade-in .18s ease
+}
+
+.memory-panel {
+    width: min(640px, 94vw);
+    max-height: 82vh;
+    overflow: auto;
+    padding: 24px;
+    border-radius: 16px;
+    background: #fff;
+    box-shadow: 0 24px 70px rgba(16, 64, 48, .24);
+    animation: drawer-in .22s ease
+}
+
+.memory-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+    padding-bottom: 14px;
+    border-bottom: 1px solid #eef2ee
+}
+
+.memory-header h2 {
+    margin: 5px 0 0;
+    font-size: 20px;
+    letter-spacing: -.4px;
+    color: #173b34
+}
+
+.memory-note {
+    margin: 12px 0 0;
+    font-size: 12px;
+    line-height: 1.7;
+    color: #6b7f78
+}
+
+.memory-rendered {
+    margin: 14px 0 0;
+    padding: 16px;
+    border: 1px solid #e2ebe5;
+    border-radius: 10px;
+    background: #f7faf8;
+    color: #315f48;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 12px;
+    line-height: 1.7;
+    white-space: pre-wrap;
+    word-break: break-word
+}
+
 .reply-chips {
     display: flex;
     flex-wrap: wrap;

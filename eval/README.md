@@ -249,3 +249,14 @@ uv run python -m eval.skill_routing
 ```
 
 当前输出 N/A，并说明原因；启用后报告准确率与逐条路由结果。
+
+## general / medical 路由评测（M11）
+
+`router_eval.py` 测预路由边界：饮食、营养、寒暄、情绪应走 general；症状、药品、检查、红旗应走 medical。
+
+```sh
+uv run python -m eval.router_eval
+uv run python -m eval.router_eval --split holdout
+```
+
+样本在 `eval/probes/router_cases.jsonl`，默认只跑 dev。报告会按类别给出准确率，并列出被误判的消息。这个评测会调用真实模型，单次结果有波动。

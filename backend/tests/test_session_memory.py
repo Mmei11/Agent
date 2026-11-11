@@ -1,5 +1,6 @@
 """Phase B：会话记忆卡的筛选、去重与视图裁剪。"""
 
+from backend.app.memory.export import render_markdown
 from backend.app.memory.session_memory import (
     DETAIL_MAX_ITEMS,
     memory_view,
@@ -89,3 +90,19 @@ def test_memory_view_respects_char_budget():
     view = memory_view(memory, max_items=8, max_chars=15)
 
     assert [item["text"] for item in view["details"]] == ["b" * 10]
+
+
+def test_render_markdown_includes_turn_and_open_questions():
+    text = render_markdown(
+        "session-1",
+        {
+            "details": [{"text": "我下周要出差", "turn": 2}],
+            "open_questions": ["部位"],
+            "recent_topic": "我下周要出差",
+        },
+        turn_id=3,
+    )
+
+    assert "[第 2 轮] 我下周要出差" in text
+    assert "- 部位" in text
+    assert "最近话题" in text

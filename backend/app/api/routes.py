@@ -32,6 +32,7 @@ from backend.app.config import load_env_file  # 统一读取 .env
 from backend.app.feedback import scores as feedback_scores  # Phase 6 L4：反馈评分
 from backend.app.feedback import store as feedback_store  # Phase 6 L4：反馈存储
 from backend.app.feedback.store import FeedbackRecord
+from backend.app.memory.export import memory_payload
 from backend.app.observability import current_trace, start_trace  # 一次请求 = 一条 trace
 from backend.app.observability.instrument import summarize_node_result  # 节点摘要白名单
 from backend.app.observability.redact import redact_text  # 反馈原因脱敏
@@ -239,6 +240,18 @@ class SessionResponse(BaseModel):
     final_result: dict = {}  # 结构化最终结果
     rendered_text: str = ""  # 给用户直接看的渲染文案
     conversation: list = []  # 完整对话，随检查点保存
+
+
+class SessionMemoryResponse(BaseModel):
+    """会话记忆导出视图：只读，不改变会话状态。"""
+
+    session_id: str
+    turn_id: int = 0
+    details: list = []  # [{"text": "...", "turn": 2}]
+    open_questions: list = []  # 仍缺失的字段
+    recent_topic: str = ""
+    turns: int = 0
+    rendered: str = ""  # Markdown 视图
 
 
 # --- 五个接口 ---
@@ -520,6 +533,21 @@ async def get_session(session_id: str):
 def _read_state_sync(session_id: str) -> dict:
     config = {"configurable": {"thread_id": session_id}}
     return _read_values(get_app(), config)
+
+
+@app.get(
+    "/sessions/{session_id}/memory",
+    response_model=SessionMemoryResponse,
+    dependencies=[Depends(rate_limit)],
+)
+async def get_session_memory(session_id: str):
+    """查看会话记忆卡：只读的非字段细节视图。
+
+    事实与结论仍以 GET /sessions/{session_id} 为准；这里只回答
+    “系统跨轮记住了哪些不进字段的细节”。
+    """
+    values = await _run_sync(_read_state_sync, session_id)
+    return memory_payload(session_id, values)
 
 
 def _read_values(graph, config: dict) -> dict:

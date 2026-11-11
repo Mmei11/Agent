@@ -220,6 +220,11 @@ export default function App() {
   const [animatedIndex, setAnimatedIndex] = useState(-1);
   // 反馈提交状态："" → submitting → done / error
   const [feedbackStatus, setFeedbackStatus] = useState("");
+  // 记忆弹层：打开时才请求，避免每轮都拉一次。
+  const [memoryOpen, setMemoryOpen] = useState(false);
+  const [memoryData, setMemoryData] = useState(null);
+  const [memoryLoading, setMemoryLoading] = useState(false);
+  const [memoryError, setMemoryError] = useState("");
 
   // ref 修改后不会触发渲染：busy 立即拦住重复点击，chatEnd 用于滚动到底部。
   const busy = useRef(false);
@@ -297,6 +302,22 @@ export default function App() {
   useEffect(() => {
     scrollChat("auto");
   }, [messages, loading, state?.suggested_replies?.length, scrollChat]);
+
+  // 切换或新建会话时关闭记忆弹层，避免显示上一段会话的内容。
+  useEffect(() => {
+    setMemoryOpen(false);
+    setMemoryData(null);
+    setMemoryError("");
+  }, [sessionId]);
+
+  useEffect(() => {
+    if (!memoryOpen) return;
+    function onKeyDown(event) {
+      if (event.key === "Escape") setMemoryOpen(false);
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [memoryOpen]);
 
   // 所有 Hook 都已声明完毕，可以按登录态切换整页内容。
   if (user === undefined) {
@@ -535,6 +556,24 @@ export default function App() {
       setFeedbackStatus("done");
     } catch {
       setFeedbackStatus("error");
+    }
+  }
+
+  // 打开记忆导出视图：只读请求，不改变会话状态。
+  async function openMemory() {
+    if (!sessionId) return;
+    setMemoryOpen(true);
+    setMemoryLoading(true);
+    setMemoryError("");
+    try {
+      const data = await requestJson(
+        "/sessions/" + encodeURIComponent(sessionId) + "/memory",
+      );
+      setMemoryData(data);
+    } catch (err) {
+      setMemoryError(err.message || "读取失败，请稍后重试。");
+    } finally {
+      setMemoryLoading(false);
     }
   }
 
@@ -790,6 +829,13 @@ export default function App() {
               <span className="section-kicker">LIVE STATE</span>
               <h2>当前会话</h2>
               <p>信息会随每轮回答更新，并保存在本地会话库中。</p>
+              <button
+                className="memory-button"
+                onClick={openMemory}
+                disabled={!sessionId || loading || restoring}
+              >
+                查看记忆
+              </button>
             </div>
             <div className="progress-block">
               <div className="progress-title">
@@ -894,6 +940,39 @@ export default function App() {
           <span className="build-tag">BUILD {__BUILD_ID__}</span>
         </footer>
       </main>
+      {memoryOpen && (
+        <div
+          className="memory-overlay"
+          role="dialog"
+          aria-modal="true"
+          aria-label="会话记忆"
+          onClick={() => setMemoryOpen(false)}
+        >
+          <div className="memory-panel" onClick={(event) => event.stopPropagation()}>
+            <div className="memory-header">
+              <div>
+                <span className="section-kicker">SESSION MEMORY</span>
+                <h2>会话记忆</h2>
+              </div>
+              <button
+                className="history-close"
+                onClick={() => setMemoryOpen(false)}
+                aria-label="关闭记忆视图"
+              >
+                ✕
+              </button>
+            </div>
+            <p className="memory-note">
+              这里只展示跨轮保留的非字段细节；完整字段和结论仍看右侧结果。
+            </p>
+            {memoryLoading && <p className="muted">正在读取记忆…</p>}
+            {memoryError && <p className="feedback-error">{memoryError}</p>}
+            {!memoryLoading && !memoryError && memoryData && (
+              <pre className="memory-rendered">{memoryData.rendered}</pre>
+            )}
+          </div>
+        </div>
+      )}
       <HistoryDrawer
         open={historyOpen}
         currentSessionId={sessionId}

@@ -102,6 +102,40 @@ def test_get_unknown_session_404():
     assert resp.status_code == 404
 
 
+def test_get_session_memory_returns_details():
+    """记忆导出视图：返回非字段细节与 Markdown。"""
+    create = client.post(
+        "/sessions",
+        json={"initial_message": "头部不适两天，前额，程度轻，伴有恶心，无病史"},
+    )
+    sid = create.json()["session_id"]
+    client.post(f"/sessions/{sid}/messages", json={"message": "我下周要出差"})
+
+    resp = client.get(f"/sessions/{sid}/memory")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["session_id"] == sid
+    assert any("出差" in item["text"] for item in data["details"])
+    assert "我下周要出差" in data["rendered"]
+    assert "未决问题" in data["rendered"]
+
+
+def test_get_session_memory_empty():
+    """空会话也能导出：返回空列表和“暂无”文案。"""
+    create = client.post("/sessions", json={"initial_message": ""})
+    sid = create.json()["session_id"]
+
+    resp = client.get(f"/sessions/{sid}/memory")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["details"] == []
+    assert "暂无记忆细节" in data["rendered"]
+
+
+def test_get_unknown_session_memory_404():
+    assert client.get("/sessions/nonexistent-id/memory").status_code == 404
+
+
 def test_delete_session():
     """删除会话：返回删除确认。"""
     create = client.post("/sessions", json={"initial_message": ""})

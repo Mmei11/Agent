@@ -1,0 +1,14 @@
+{"id": "RT01", "split": "dev", "category": "general", "message": "晚上我吃了一份生菜，一根肠，还有一份玉米烙，还有二两饭，健康不？", "expected_intent": "general", "note": "饮食搭配，不是身体症状"}
+{"id": "RT02", "split": "dev", "category": "general", "message": "这样的饮食均衡吗", "expected_intent": "general", "note": "营养常识"}
+{"id": "RT03", "split": "dev", "category": "general", "message": "你好你好", "expected_intent": "general", "note": "寒暄"}
+{"id": "RT04", "split": "dev", "category": "general", "message": "今天很开心啊", "expected_intent": "general", "note": "即时情绪"}
+{"id": "RT05", "split": "dev", "category": "general", "message": "今天几号？", "expected_intent": "general", "note": "日期"}
+{"id": "RT06", "split": "dev", "category": "general", "message": "你能做什么？", "expected_intent": "general", "note": "身份/产品"}
+{"id": "RT07", "split": "dev", "category": "general", "message": "最近压力有点大，想聊聊", "expected_intent": "general", "note": "倾诉"}
+{"id": "RT08", "split": "dev", "category": "medical", "message": "头部不适两天，前额，程度轻，伴有恶心", "expected_intent": "medical", "note": "症状描述"}
+{"id": "RT09", "split": "dev", "category": "medical", "message": "我吃了布洛芬还是头疼", "expected_intent": "medical", "note": "药品 + 症状"}
+{"id": "RT10", "split": "dev", "category": "medical", "message": "体检报告说甲状腺结节，需要复查吗", "expected_intent": "medical", "note": "检查结果与就医判断"}
+{"id": "RT11", "split": "holdout", "category": "medical", "message": "突然呼吸困难", "expected_intent": "medical", "note": "红旗"}
+{"id": "RT12", "split": "holdout", "category": "medical", "message": "孩子发烧三十八度五，精神不好", "expected_intent": "medical", "note": "儿童发热"}
+{"id": "RT13", "split": "holdout", "category": "general", "message": "我想减肥，晚饭不吃可以吗", "expected_intent": "general", "note": "生活方式；没有症状"}
+{"id": "RT14", "split": "holdout", "category": "medical", "message": "晚上吃了这些以后胃疼", "expected_intent": "medical", "note": "进食后出现症状，应转医疗"}

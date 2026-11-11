@@ -251,11 +251,20 @@ curl -s http://localhost:8081/sessions/SESSION_ID
 curl -X DELETE http://localhost:8081/sessions/SESSION_ID
 ```
 
+### 查看会话记忆
+
+```sh
+curl -s http://localhost:8081/sessions/SESSION_ID/memory
+```
+
+返回 `details`（跨轮保留的非字段细节）、`open_questions`、`recent_topic`、`turns`，以及一份渲染好的 Markdown `rendered`。这个接口只读，事实与结论仍以 `GET /sessions/{session_id}` 为准。前端右侧「当前会话」面板里的「查看记忆」按钮调用同一个接口，以弹层展示这份视图。
+
 | 方法 | 路径 | 用途 |
 | --- | --- | --- |
 | `POST` | `/sessions` | 创建会话；可传 `initial_message` |
 | `POST` | `/sessions/{session_id}/messages` | 向未结束的会话发送一轮消息 |
 | `GET` | `/sessions/{session_id}` | 读取当前持久化状态 |
+| `GET` | `/sessions/{session_id}/memory` | 读取会话记忆卡（只读） |
 | `DELETE` | `/sessions/{session_id}` | 删除该会话的 SQLite 检查点 |
 
 Swagger 文档提供交互式请求界面：<http://localhost:8081/docs>（本机开发时为 <http://localhost:8000/docs>）。向已结束的会话继续发消息会返回 `409`；不存在的会话返回 `404`；空白的后续消息返回 `400`。
