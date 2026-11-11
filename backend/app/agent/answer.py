@@ -16,6 +16,7 @@ from backend.app.agent.general import (
     general_answer_is_safe,
     is_date_question,
 )
+from backend.app.agent.memory_ref import is_memory_reference
 from backend.app.agent.router import route as route_reply
 from backend.app.agent.session_info import (
     build_answer as build_session_info_answer,
@@ -37,9 +38,13 @@ from backend.app.safety.rule_engine import final_check
 
 # 观测用的 prompt 标识：改 prompt 时同步升版本，才能按版本对比指标。
 PROMPT_NAME = "answer.followup"
-PROMPT_VERSION = "v3"
+PROMPT_VERSION = "v4"
 
 MAX_ANSWER_CHARS = 400
+
+# 追问回答只带最近这么多条对话（用户/助手各算一条）。
+# 抽成常量是为了让评测脚本和实现共用同一个窗口，避免两边写死不同数字。
+RECENT_CONVERSATION_ITEMS = 6
 
 SAFE_FALLBACK = (
     "本系统只提供模拟问诊与就医方向整理，不提供确诊、处方或用药建议。"
@@ -87,7 +92,8 @@ ANSWER_SYSTEM_PROMPT = """你是"模拟问诊"项目的追问回答器。用户�
 - recent_conversation：最近几轮对话
 
 回答要求：
-1. 只根据 collected_facts 和 final_result 回答，不新增诊断，不推断用户没说过的情况。
+1. 只根据 collected_facts、final_result 和 recent_conversation 回答，不新增诊断，不推断用户没说过的情况。
+   recent_conversation 只用于回答“我刚才说过什么”这类记忆问题，不要把它当成新的症状信息。
 2. 不列举具体疾病名称，不做鉴别诊断。不要出现"可能是XX病""需要排查XX病"这类表述；
    需要解释原因时统一说"具体原因需要医生面诊判断"。
 3. 不使用可能引起焦虑的严重疾病名称。
@@ -102,7 +108,9 @@ ANSWER_SYSTEM_PROMPT = """你是"模拟问诊"项目的追问回答器。用户�
 10. 回答 20 到 200 个汉字，口语化，最多两段。
 11. grounded：布尔值。回答使用了 final_result 中的就诊方向、风险提示或知识库来源时为 true；
     只是通用健康常识（如空腹、挂号、准备材料、生活建议）时为 false。
-12. 只输出 JSON：{"answer": "...", "grounded": true}，不要 Markdown 或额外字段。"""
+12. 用户问“我刚才说过什么”“之前提到的……”时，只复述 recent_conversation 里确实出现过的内容；
+    找不到就明确说“这轮对话里没有记录到”，不要猜，也不要用常识补全。
+13. 只输出 JSON：{"answer": "...", "grounded": true}，不要 Markdown 或额外字段。"""
 
 
 def _usage_dict(usage: LLMResult | None) -> dict:
@@ -123,7 +131,7 @@ def build_context(state: ConsultationState) -> dict:
         "question": state.latest_user_message,
         "collected_facts": state.collected_facts,
         "final_result": state.final_result,
-        "recent_conversation": state.conversation[-6:],
+        "recent_conversation": state.conversation[-RECENT_CONVERSATION_ITEMS:],
     }
 
 
@@ -134,7 +142,10 @@ def generate_with_meta(
     with span(
         "answer.followup",
         kind="internal",
-        attributes={"answer.result_status": state.final_result.get("status", "")},
+        attributes={
+            "answer.result_status": state.final_result.get("status", ""),
+            "answer.memory_reference": is_memory_reference(state.latest_user_message),
+        },
     ) as record:
         reply, usage = chat_structured(
             [
@@ -164,11 +175,15 @@ def fallback_answer(state: ConsultationState) -> str:
     return "当前信息已整理完成。如需进一步了解，请补充具体问题，或咨询专业医生。"
 
 
-def _with_context(text: str, result: dict, grounded: bool) -> str:
+def _with_context(
+    text: str, result: dict, grounded: bool, *, memory_reference: bool = False
+) -> str:
     """按回答是否真的引用分诊结果，决定附加依据还是一般信息说明。
 
     未核实的出处不在追问气泡里重复，避免把通用建议伪装成有出处的结论；
     详细出处仍保留在右侧的会话结果里。
+
+    记忆类回答不套“一般健康信息”的尾巴：它复述的是本轮对话，不是健康常识。
     """
     limitations = (
         result.get("limitations")
@@ -179,7 +194,9 @@ def _with_context(text: str, result: dict, grounded: bool) -> str:
     if limitations and limitations not in text:
         parts.append(limitations)
 
-    if grounded:
+    if memory_reference:
+        parts.append("以上内容来自本轮对话记录。")
+    elif grounded:
         if source_note:
             if "未核实" in source_note:
                 parts.append("依据：本轮分诊结果，具体原因需医生面诊判断。")
@@ -379,13 +396,18 @@ def answer_followup(state: ConsultationState) -> dict:
     if is_session_info_query(state.latest_user_message):
         return _session_info_answer(state)
 
-    if is_date_question(state.latest_user_message):
+    # 记忆指代优先于日期规则：问“我刚才说几月几号要去”时，
+    # 答案在对话里，不是今天的日期。
+    memory_reference = is_memory_reference(state.latest_user_message)
+
+    if not memory_reference and is_date_question(state.latest_user_message):
         return _date_answer(state)
 
     # 其余追问交给单一路由：普通问题直接回答，医疗问题继续走下面的医疗链路。
-    router_intent = "medical"
+    # 记忆指代必须走带上下文的 answer 节点，所以命中后跳过路由。
+    router_intent = "memory" if memory_reference else "medical"
     router_usage = None
-    if os.getenv("USE_MODEL") == "1":
+    if os.getenv("USE_MODEL") == "1" and not memory_reference:
         try:
             routed, router_usage = route_reply(state.latest_user_message)
             router_intent = routed.intent
@@ -445,7 +467,9 @@ def answer_followup(state: ConsultationState) -> dict:
     else:
         # 先过规则边界再补免责声明/依据，避免把“处方”等词喂给 final_check。
         if not service_unavailable:
-            text = _with_context(text, result, grounded)
+            text = _with_context(
+                text, result, grounded, memory_reference=memory_reference
+            )
         with span("safety.output", kind="safety") as record:
             verdict = check_output(
                 text,
@@ -471,6 +495,7 @@ def answer_followup(state: ConsultationState) -> dict:
                 "grounded": grounded,
                 "router_intent": router_intent,
                 "router_usage": _usage_dict(router_usage),
+                "memory_reference": memory_reference,
                 "service_unavailable": service_unavailable,
                 "differential_replaced": differential_replaced,
                 "output_passed": output_passed,

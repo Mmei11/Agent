@@ -1,0 +1,106 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="800" viewBox="0 0 1200 800" font-family="'DM Sans','Noto Sans SC',-apple-system,BlinkMacSystemFont,sans-serif">
+  <rect width="1200" height="800" fill="#fbfdfb"/>
+  <rect x="1" y="1" width="1198" height="798" rx="18" fill="none" stroke="#e2ebe5"/>
+
+  <text x="44" y="46" font-size="20" font-weight="700" fill="#18332f">Consult/Lab · Agent 能力成熟度地图</text>
+  <text x="44" y="72" font-size="12.5" fill="#6b7f78">一条完整纵向链路已经跑通；真正的差距在“运行时能力层”，而不是业务功能。数据截至 2026-11-11，438 个后端测试全绿。</text>
+
+  <!-- 表头 -->
+  <text x="44" y="112" font-size="11.5" font-weight="700" fill="#8a9b94">维度</text>
+  <text x="200" y="112" font-size="11.5" font-weight="700" fill="#8a9b94">当前实现</text>
+  <text x="700" y="112" font-size="11.5" font-weight="700" fill="#8a9b94">成熟度</text>
+  <text x="875" y="112" font-size="11.5" font-weight="700" fill="#8a9b94">关键缺口</text>
+  <line x1="40" y1="124" x2="1160" y2="124" stroke="#e2ebe5"/>
+
+  <!-- 行 1 -->
+  <rect x="40" y="136" width="1120" height="68" rx="10" fill="#f4f8f5"/>
+  <text x="52" y="165" font-size="13.5" font-weight="700" fill="#2f4f45">产品与运维</text>
+  <text x="52" y="185" font-size="10.5" fill="#7d8f88">Phase 6–7</text>
+  <text x="200" y="160" font-size="11.5" fill="#3d4f47">账号 · 历史 · SSE 流式 · 并发 · 限流 · 反馈 · 审计</text>
+  <text x="200" y="182" font-size="11" fill="#7d8f88">游客认领、同会话在途锁、请求级 trace</text>
+  <rect x="700" y="160" width="150" height="8" rx="4" fill="#e4ece7"/>
+  <rect x="700" y="160" width="132" height="8" rx="4" fill="#3f8a6b"/>
+  <text x="860" y="168" font-size="10.5" font-weight="700" fill="#3f8a6b">88</text>
+  <text x="875" y="160" font-size="11.5" fill="#5c7369">邮箱验证 / 找回密码 / 数据留存策略 / PG 迁移</text>
+
+  <!-- 行 2 -->
+  <rect x="40" y="212" width="1120" height="68" rx="10" fill="#f7faf8"/>
+  <text x="52" y="241" font-size="13.5" font-weight="700" fill="#2f4f45">安全与合规</text>
+  <text x="52" y="261" font-size="10.5" fill="#7d8f88">Phase 5</text>
+  <text x="200" y="236" font-size="11.5" fill="#3d4f47">输入 / 策略 / 输出三道闸 + 50 条对抗集 + 审计</text>
+  <text x="200" y="258" font-size="11" fill="#7d8f88">风险召回 1.00、误报 0.00（自写探针）</text>
+  <rect x="700" y="236" width="150" height="8" rx="4" fill="#e4ece7"/>
+  <rect x="700" y="236" width="128" height="8" rx="4" fill="#3f8a6b"/>
+  <text x="860" y="244" font-size="10.5" font-weight="700" fill="#3f8a6b">85</text>
+  <text x="875" y="236" font-size="11.5" fill="#5c7369">知识来源仍未核实；输出层缺 LLM 第二意见</text>
+
+  <!-- 行 3 -->
+  <rect x="40" y="288" width="1120" height="68" rx="10" fill="#f4f8f5"/>
+  <text x="52" y="317" font-size="13.5" font-weight="700" fill="#2f4f45">评测与观测</text>
+  <text x="52" y="337" font-size="10.5" fill="#7d8f88">Phase 0–3</text>
+  <text x="200" y="312" font-size="11.5" fill="#3d4f47">33 案例 · 探针 · recall · faithfulness · judge · Langfuse</text>
+  <text x="200" y="334" font-size="11" fill="#7d8f88">回归门禁、压测、盲标校准都已落地</text>
+  <rect x="700" y="312" width="150" height="8" rx="4" fill="#e4ece7"/>
+  <rect x="700" y="312" width="132" height="8" rx="4" fill="#3f8a6b"/>
+  <text x="860" y="320" font-size="10.5" font-weight="700" fill="#3f8a6b">88</text>
+  <text x="875" y="312" font-size="11.5" fill="#5c7369">缺“多轮记忆保持”“工具选择正确率”两类评测</text>
+
+  <!-- 行 4 -->
+  <rect x="40" y="364" width="1120" height="68" rx="10" fill="#f7faf8"/>
+  <text x="52" y="393" font-size="13.5" font-weight="700" fill="#2f4f45">知识检索</text>
+  <text x="52" y="413" font-size="10.5" fill="#7d8f88">Phase 4</text>
+  <text x="200" y="388" font-size="11.5" fill="#3d4f47">pgvector 向量 + 关键词双路，22 条带出处条目</text>
+  <text x="200" y="410" font-size="11" fill="#7d8f88">recall@5 1.000、faithfulness 0.983</text>
+  <rect x="700" y="388" width="150" height="8" rx="4" fill="#e4ece7"/>
+  <rect x="700" y="388" width="108" height="8" rx="4" fill="#8a7a3b"/>
+  <text x="860" y="396" font-size="10.5" font-weight="700" fill="#8a7a3b">72</text>
+  <text x="875" y="388" font-size="11.5" fill="#5c7369">条目是项目自归纳、verified=false；查询集自写偏乐观</text>
+
+  <!-- 行 5 -->
+  <rect x="40" y="440" width="1120" height="68" rx="10" fill="#fdfaf6"/>
+  <text x="52" y="469" font-size="13.5" font-weight="700" fill="#6b4a33">工具层</text>
+  <text x="52" y="489" font-size="10.5" fill="#9b8574">Phase 4</text>
+  <text x="200" y="464" font-size="11.5" fill="#5c4636">ToolSpec 契约 + 3 个知识工具 + MCP server</text>
+  <text x="200" y="486" font-size="11" fill="#8c7664">超时 / 失败分类 / 空结果语义 / 幂等声明齐全</text>
+  <rect x="700" y="464" width="150" height="8" rx="4" fill="#efe6dc"/>
+  <rect x="700" y="464" width="90" height="8" rx="4" fill="#b07a45"/>
+  <text x="860" y="472" font-size="10.5" font-weight="700" fill="#b07a45">60</text>
+  <text x="875" y="464" font-size="11.5" fill="#7a6353">只有 MCP server 没有 client；图里只接了 1 个工具</text>
+
+  <!-- 行 6 -->
+  <rect x="40" y="516" width="1120" height="68" rx="10" fill="#fdf7f5"/>
+  <text x="52" y="545" font-size="13.5" font-weight="700" fill="#7a3f33">记忆与上下文</text>
+  <text x="52" y="565" font-size="10.5" fill="#a98b84">优化重点</text>
+  <text x="200" y="540" font-size="11.5" fill="#6b4038">checkpoint + 结构化 facts + 最近 6 条对话</text>
+  <text x="200" y="562" font-size="11" fill="#9b7c75">会话内记忆本质是一张表，不是一段对话</text>
+  <rect x="700" y="540" width="150" height="8" rx="4" fill="#f0e3df"/>
+  <rect x="700" y="540" width="53" height="8" rx="4" fill="#b45f4a"/>
+  <text x="860" y="548" font-size="10.5" font-weight="700" fill="#b45f4a">35</text>
+  <text x="875" y="540" font-size="11.5" fill="#8a5a4d">无滚动摘要；intake/decision 看不到对话原文</text>
+
+  <!-- 行 7 -->
+  <rect x="40" y="592" width="1120" height="68" rx="10" fill="#fdf7f5"/>
+  <text x="52" y="621" font-size="13.5" font-weight="700" fill="#7a3f33">技能与编排</text>
+  <text x="52" y="641" font-size="10.5" fill="#a98b84">优化重点</text>
+  <text x="200" y="616" font-size="11.5" fill="#6b4038">固定 8 节点图 + 3 个动作 + 单一 6 字段 schema</text>
+  <text x="200" y="638" font-size="11" fill="#9b7c75">追问话术是模板，模型只生成快捷选项</text>
+  <rect x="700" y="616" width="150" height="8" rx="4" fill="#f0e3df"/>
+  <rect x="700" y="616" width="45" height="8" rx="4" fill="#b45f4a"/>
+  <text x="860" y="624" font-size="10.5" font-weight="700" fill="#b45f4a">30</text>
+  <text x="875" y="616" font-size="11.5" fill="#8a5a4d">没有技能注册表；换一个病种就要改代码</text>
+
+  <!-- 行 8 -->
+  <rect x="40" y="668" width="1120" height="68" rx="10" fill="#fbf5f7"/>
+  <text x="52" y="697" font-size="13.5" font-weight="700" fill="#6b3a4d">多 Agent</text>
+  <text x="52" y="717" font-size="10.5" fill="#a88a97">刻意未做</text>
+  <text x="200" y="692" font-size="11.5" fill="#5c3c49">未做；路线图中明确拒绝自由协作式多 Agent</text>
+  <text x="200" y="714" font-size="11" fill="#907582">这个判断是对的，但“有界分工”仍然值得做</text>
+  <rect x="700" y="692" width="150" height="8" rx="4" fill="#efe3e9"/>
+  <rect x="700" y="692" width="15" height="8" rx="4" fill="#8a5560"/>
+  <text x="860" y="700" font-size="10.5" font-weight="700" fill="#8a5560">10</text>
+  <text x="875" y="692" font-size="11.5" fill="#7d6572">候选：有界 critic / 技能 supervisor，先定指标再上</text>
+
+  <!-- 底部结论 -->
+  <line x1="40" y1="756" x2="1160" y2="756" stroke="#e2ebe5"/>
+  <text x="44" y="780" font-size="11.5" fill="#5c7369">建议顺序不是“分数最低的先做”，而是 6 → 5 → 7 → 8：上下文治理是地基，工具运行时是杠杆，技能层是产品化，多 Agent 最后再谈。</text>
+</svg>

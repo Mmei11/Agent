@@ -238,6 +238,63 @@ def test_answer_allows_low_risk_lifestyle_advice(monkeypatch):
     assert result["trace"][0]["output_violations"] == []
 
 
+def test_memory_reference_skips_router(monkeypatch):
+    """记忆指代类追问不走单路由，直接进入带上下文的回答节点。"""
+    monkeypatch.setenv("USE_MODEL", "1")
+
+    def fail_router(message):
+        raise AssertionError("memory reference should not go through router")
+
+    monkeypatch.setattr(answer_module, "route_reply", fail_router)
+
+    def fake_generate(state):
+        return (
+            SimpleNamespace(answer="你刚才说更喜欢下午去。", grounded=False),
+            fake_usage(),
+        )
+
+    monkeypatch.setattr(answer_module, "generate_with_meta", fake_generate)
+
+    result = answer_module.answer_followup(make_state("我刚才说更喜欢什么时候去？"))
+
+    assert "下午" in result["rendered_text"]
+    assert result["trace"][0]["source"] == "model"
+    assert result["trace"][0]["router_intent"] == "memory"
+    assert result["trace"][0]["memory_reference"] is True
+
+
+def test_memory_reference_takes_precedence_over_date(monkeypatch):
+    """“我刚才说几月几号要去”问的是对话，不是今天的日期。"""
+    monkeypatch.setenv("USE_MODEL", "1")
+
+    def fake_generate(state):
+        return (
+            SimpleNamespace(answer="你刚才说下周三要去。", grounded=False),
+            fake_usage(),
+        )
+
+    monkeypatch.setattr(answer_module, "generate_with_meta", fake_generate)
+
+    result = answer_module.answer_followup(make_state("我刚才说几月几号要去？"))
+
+    assert result["trace"][0]["memory_reference"] is True
+    assert result["trace"][0]["source"] == "model"
+    assert "下周三" in result["rendered_text"]
+
+
+def test_memory_answer_uses_conversation_note():
+    """记忆类回答不套“一般健康信息”的尾巴，改说明来自本轮对话。"""
+    text = answer_module._with_context(
+        "你刚才说下周要出差。",
+        make_state().final_result,
+        False,
+        memory_reference=True,
+    )
+
+    assert "以上内容来自本轮对话记录" in text
+    assert "一般健康信息" not in text
+
+
 def test_blocked_answer_is_safe():
     """兜底文案本身要能通过输出层校验。"""
     from backend.app.safety.output_rail import check

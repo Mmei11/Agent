@@ -291,3 +291,60 @@
 - 实测新会话 `fc50ecc7-...`：Session 下正确显示 `http.request`（1 span）与 `consultation.turn`（7 span）
 - Session 视图的 “This trace has no messages or tools” 是预期行为：该视图依赖 `gen_ai.input.messages` / `output.messages`，我们为隐私只写 span 元数据，不写对话原文；查看 span 请点 trace 或用 Tracing → Traces
 - 单测：328 passed
+
+## Phase A｜能力层指标（2026-11-11）
+
+**2026-11-11 · M6 上下文保持率：建立测量链路**
+
+- 新增 `eval/context_retention.py`：用 TestClient 跑真实图，多轮会话后在探针轮检查四层命中
+- 新增 `eval/probes/context_retention.jsonl`：10 条虚构样本（8 dev / 2 holdout），分 `fact` / `conversation` 两类，各有 near / far 对照
+- 口径：`state`（结构化字段）、`window`（最近 6 条对话）、`prompt`（answer 节点实际上下文）、`answer`（最终回答）、`bypass`（被单路由直接回答、未走 answer 节点）
+- mock 基线（dev 8 条）：
+
+| 组别 | n | state | window | prompt | answer | bypass |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 全部 | 8 | 0.375 | 0.500 | 0.625 | 0.000 | 0 |
+| fact / far | 2 | 1.000 | 0.500 | 1.000 | 0.000 | 0 |
+| conversation / near | 2 | 0.000 | 1.000 | 1.000 | 0.000 | 0 |
+| conversation / far | 3 | 0.000 | 0.000 | 0.000 | 0.000 | 0 |
+
+- 关键结论：
+  1. 事实类 `state=1.0`、`prompt=1.0`，`window` 有一半命中，因为首轮结果消息本身复述了字段；answer 节点又拿的是全量字段，所以事实类不依赖记忆卡也能保持。
+  2. 对话类 far 三层全 0，是 Phase B 会话记忆要解决的直接证据。
+  3. mock 的 `answer=0` 是兜底文案造成的，不作为质量结论；模型模式的 `answer` 才有意义。
+- 单测：444 passed（新增 6 条判定逻辑测试）
+- 模型基线（dev 8 条，分两批跑，离线合并重算）：
+
+| 组别 | n | state | window | prompt | answer | bypass | 否认回忆 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 全部 | 8 | 0.375 | 0.625 | 0.625 | — | 8 | 4 |
+| fact / far | 2 | 1.000 | 1.000 | 1.000 | — | 2 | 0 |
+| conversation / near | 2 | 0.000 | 1.000 | 1.000 | — | 2 | 2 |
+| conversation / far | 3 | 0.000 | 0.000 | 0.000 | — | 3 | 2 |
+
+- **关键发现**：8/8 探针被单路由判为普通问题，由 router 直接回答，带上下文的 answer 节点一次都没参与。CR01（near，细节就在窗口里）仍回答“你之前没有提到过”；CR02（far）回答“我无法查看之前的对话记录”。
+- **测量坑修复**：CR05 的回答是“没有提到过……上午、下午还是晚上？”，`上午` 只是澄清问句枚举，被原判定误判为命中。新增“否认回忆”检查：出现“没有提到/无法查看/不记得”时，即使子串命中也算失败；已用保存的回答离线重算，未重复调用模型。
+- **结论**：Phase B 不能只加记忆存储，必须同时改路由——记忆指代类问题要进入带记忆的 answer 节点，或在 router prompt 注入记忆卡摘要。目标改为：对话类 `bypass=0`、`否认回忆=0`、context 路径 `answer≥0.90`。
+- 剩余：M7 工具选择、M8 token 账本尚未实现；M6 holdout 留到阶段末。
+
+**2026-11-11 · 路由修复：记忆指代走上下文路径**
+
+- 新增 `backend/app/agent/memory_ref.py`：确定性识别“我刚才说 / 之前提到 / 你还记得 / 我说过什么”等记忆指代
+- `answer_followup` 在单路由之前判断：命中记忆指代就跳过 router，直接进入带 `recent_conversation` 的 answer 节点；记忆指代优先于日期规则（“我刚才说几月几号要去”问的是对话，不是今天）
+- `ANSWER_SYSTEM_PROMPT` 升到 v4：明确 `recent_conversation` 只用于记忆问题；找不到就说“这轮对话里没有记录到”，不许猜
+- 记忆类回答的附加说明改为“以上内容来自本轮对话记录”，不再套“一般健康信息”
+- 新增 `answer.memory_reference` span 属性；state trace 记录 `memory_reference` 与 `router_intent=memory`
+- 单测：460 passed（新增记忆指代正反例、跳路由、日期优先级、附加说明共 10 条）
+- 预期：M6 `bypass` 8→0；near 样本应开始命中；far 样本仍会失败，因为最近窗口仍只有 6 条——这正是 Phase B 记忆卡要补的部分
+- 修复后模型基线（dev 8 条，探针前快照口径）：
+
+| 组别 | n | state | window | prompt | answer | bypass | 否认回忆 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 全部 | 8 | 0.375 | 0.625 | 0.625 | 0.625 | 0 | 2 |
+| fact 全部 | 3 | 1.000 | 1.000 | 1.000 | 1.000 | 0 | 0 |
+| conversation / near | 2 | 0.000 | 1.000 | 1.000 | 1.000 | 0 | 0 |
+| conversation / far | 3 | 0.000 | 0.000 | 0.000 | 0.000 | 0 | 2 |
+
+- 结论：`bypass` 8→0；事实类 3/3、近距对话 2/2 命中；远距对话 0/3，模型明确回答“这轮对话里没有记录到”，没有编造。路由修复已经把它和“记忆存储”问题分开，剩下的远距丢失进入 Phase B。
+- 测量口径修复：首次修复后运行的 `window/prompt` 被探针回答自身污染（CR03 的回答含“地铁”，把窗口点亮）。已改为“探针发送前的状态快照 + 探针用户消息”，并重跑干净的 8 条；上表是干净结果。
+- 单测：461 passed（新增探针前快照测试）。

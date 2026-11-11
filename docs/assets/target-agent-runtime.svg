@@ -1,0 +1,109 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="720" viewBox="0 0 1200 720" font-family="'DM Sans','Noto Sans SC',-apple-system,BlinkMacSystemFont,sans-serif">
+  <defs>
+    <marker id="up" markerWidth="9" markerHeight="9" refX="4.5" refY="0" orient="auto">
+      <path d="M0,9 L4.5,0 L9,9 z" fill="#9db3aa"/>
+    </marker>
+  </defs>
+
+  <rect width="1200" height="720" fill="#fbfdfb"/>
+  <rect x="1" y="1" width="1198" height="718" rx="18" fill="none" stroke="#e2ebe5"/>
+
+  <text x="44" y="46" font-size="20" font-weight="700" fill="#18332f">目标结构：从固定工作流到可扩展 Agent 运行时</text>
+  <text x="44" y="72" font-size="12.5" fill="#6b7f78">绿色为已有能力，橙色虚线为新增层。新增层只负责装配、调度与记忆，不接管安全门控。</text>
+
+  <!-- 纵向依赖箭头 -->
+  <line x1="1168" y1="600" x2="1168" y2="116" stroke="#9db3aa" stroke-width="1.4" marker-end="url(#up)"/>
+  <text x="1158" y="360" font-size="10.5" fill="#8a9b94" text-anchor="middle" transform="rotate(-90 1158 360)">能力逐层依赖</text>
+
+  <!-- Band 1 产品与接入 -->
+  <rect x="40" y="100" width="1090" height="72" rx="12" fill="#f4f8f5" stroke="#e0eae3"/>
+  <text x="54" y="132" font-size="13" font-weight="700" fill="#2f4f45">产品与接入</text>
+  <text x="54" y="152" font-size="10.5" fill="#7d8f88">已成熟</text>
+  <rect x="210" y="114" width="164" height="44" rx="8" fill="#e7f1eb" stroke="#cfe2d7"/>
+  <text x="292" y="141" font-size="12" fill="#2f5f55" text-anchor="middle">前端 React</text>
+  <rect x="386" y="114" width="164" height="44" rx="8" fill="#e7f1eb" stroke="#cfe2d7"/>
+  <text x="468" y="141" font-size="12" fill="#2f5f55" text-anchor="middle">FastAPI / SSE</text>
+  <rect x="562" y="114" width="164" height="44" rx="8" fill="#e7f1eb" stroke="#cfe2d7"/>
+  <text x="644" y="141" font-size="12" fill="#2f5f55" text-anchor="middle">账号 / 历史</text>
+  <rect x="738" y="114" width="164" height="44" rx="8" fill="#e7f1eb" stroke="#cfe2d7"/>
+  <text x="820" y="141" font-size="12" fill="#2f5f55" text-anchor="middle">反馈 / 审计</text>
+  <rect x="914" y="114" width="200" height="44" rx="8" fill="#e7f1eb" stroke="#cfe2d7"/>
+  <text x="1014" y="141" font-size="12" fill="#2f5f55" text-anchor="middle">限流 / 体积 / 在途锁</text>
+
+  <!-- Band 2 编排层 -->
+  <rect x="40" y="188" width="1090" height="82" rx="12" fill="#f7faf8" stroke="#e0eae3"/>
+  <text x="54" y="222" font-size="13" font-weight="700" fill="#2f4f45">编排层</text>
+  <text x="54" y="242" font-size="10.5" fill="#7d8f88">单图优先</text>
+  <rect x="210" y="202" width="250" height="54" rx="8" fill="#e7f1eb" stroke="#cfe2d7"/>
+  <text x="335" y="225" font-size="12" fill="#2f5f55" text-anchor="middle">LangGraph 8 节点</text>
+  <text x="335" y="244" font-size="10.5" fill="#5c7369" text-anchor="middle">intake → risk → decision → tool → output</text>
+  <rect x="472" y="202" width="250" height="54" rx="8" fill="#fdf3e9" stroke="#e2b78e" stroke-dasharray="5 4"/>
+  <text x="597" y="225" font-size="12" fill="#8a5a3b" text-anchor="middle">技能路由节点</text>
+  <text x="597" y="244" font-size="10.5" fill="#8a6a52" text-anchor="middle">medical 之后选择 playbook</text>
+  <rect x="734" y="202" width="250" height="54" rx="8" fill="#fdf3e9" stroke="#e2b78e" stroke-dasharray="5 4"/>
+  <text x="859" y="225" font-size="12" fill="#8a5a3b" text-anchor="middle">有界 critic（可选）</text>
+  <text x="859" y="244" font-size="10.5" fill="#8a6a52" text-anchor="middle">只有否决权，不接管主流程</text>
+  <rect x="996" y="202" width="118" height="54" rx="8" fill="#eef2ef" stroke="#dbe4de"/>
+  <text x="1055" y="225" font-size="11.5" fill="#3d4f47" text-anchor="middle">单轮</text>
+  <text x="1055" y="243" font-size="11.5" fill="#3d4f47" text-anchor="middle">工具预算</text>
+
+  <!-- Band 3 能力层 -->
+  <rect x="40" y="286" width="1090" height="110" rx="12" fill="#fdfaf6" stroke="#efe0d2"/>
+  <text x="54" y="322" font-size="13" font-weight="700" fill="#6b4a33">能力层</text>
+  <text x="54" y="342" font-size="10.5" fill="#9b8574">新增为主</text>
+  <rect x="210" y="300" width="230" height="80" rx="8" fill="#fdf3e9" stroke="#e2b78e" stroke-dasharray="5 4"/>
+  <text x="325" y="326" font-size="12.5" font-weight="700" fill="#8a5a3b" text-anchor="middle">ContextAssembler</text>
+  <text x="325" y="346" font-size="10.5" fill="#8a6a52" text-anchor="middle">按节点预算装配上下文</text>
+  <text x="325" y="364" font-size="10.5" fill="#8a6a52" text-anchor="middle">tool 结果摘要 · 超限裁剪</text>
+  <rect x="452" y="300" width="230" height="80" rx="8" fill="#fdf3e9" stroke="#e2b78e" stroke-dasharray="5 4"/>
+  <text x="567" y="326" font-size="12.5" font-weight="700" fill="#8a5a3b" text-anchor="middle">MemoryStore</text>
+  <text x="567" y="346" font-size="10.5" fill="#8a6a52" text-anchor="middle">会话记忆卡 · 滚动摘要</text>
+  <text x="567" y="364" font-size="10.5" fill="#8a6a52" text-anchor="middle">事实 / 结论 / 未决问题</text>
+  <rect x="694" y="300" width="230" height="80" rx="8" fill="#fdf3e9" stroke="#e2b78e" stroke-dasharray="5 4"/>
+  <text x="809" y="326" font-size="12.5" font-weight="700" fill="#8a5a3b" text-anchor="middle">ToolRuntime</text>
+  <text x="809" y="346" font-size="10.5" fill="#8a6a52" text-anchor="middle">工具目录 · 参数校验 · 超时</text>
+  <text x="809" y="364" font-size="10.5" fill="#8a6a52" text-anchor="middle">风险分级 · 健康检查</text>
+  <rect x="936" y="300" width="178" height="80" rx="8" fill="#fdf3e9" stroke="#e2b78e" stroke-dasharray="5 4"/>
+  <text x="1025" y="326" font-size="12.5" font-weight="700" fill="#8a5a3b" text-anchor="middle">SkillRegistry</text>
+  <text x="1025" y="346" font-size="10.5" fill="#8a6a52" text-anchor="middle">技能清单</text>
+  <text x="1025" y="364" font-size="10.5" fill="#8a6a52" text-anchor="middle">按需加载指令</text>
+
+  <!-- Band 4 模型与数据访问 -->
+  <rect x="40" y="404" width="1090" height="110" rx="12" fill="#f4f8f5" stroke="#e0eae3"/>
+  <text x="54" y="440" font-size="13" font-weight="700" fill="#2f4f45">模型与数据访问</text>
+  <text x="54" y="460" font-size="10.5" fill="#7d8f88">已有一部分</text>
+  <rect x="210" y="418" width="196" height="80" rx="8" fill="#e7f1eb" stroke="#cfe2d7"/>
+  <text x="308" y="450" font-size="12" fill="#2f5f55" text-anchor="middle">llm.client</text>
+  <text x="308" y="470" font-size="10.5" fill="#5c7369" text-anchor="middle">chat / structured</text>
+  <rect x="418" y="418" width="196" height="80" rx="8" fill="#e7f1eb" stroke="#cfe2d7"/>
+  <text x="516" y="450" font-size="12" fill="#2f5f55" text-anchor="middle">embeddings</text>
+  <text x="516" y="470" font-size="10.5" fill="#5c7369" text-anchor="middle">DashScope / mock</text>
+  <rect x="626" y="418" width="196" height="80" rx="8" fill="#e7f1eb" stroke="#cfe2d7"/>
+  <text x="724" y="450" font-size="12" fill="#2f5f55" text-anchor="middle">pgvector retrieval</text>
+  <text x="724" y="470" font-size="10.5" fill="#5c7369" text-anchor="middle">向量 + 关键词双路</text>
+  <rect x="834" y="418" width="164" height="80" rx="8" fill="#fdf3e9" stroke="#e2b78e" stroke-dasharray="5 4"/>
+  <text x="916" y="450" font-size="12" fill="#8a5a3b" text-anchor="middle">MCP adapters</text>
+  <text x="916" y="470" font-size="10.5" fill="#8a6a52" text-anchor="middle">stdio / HTTP</text>
+  <rect x="1010" y="418" width="104" height="80" rx="8" fill="#e7f1eb" stroke="#cfe2d7"/>
+  <text x="1062" y="450" font-size="11.5" fill="#2f5f55" text-anchor="middle">drugs</text>
+  <text x="1062" y="470" font-size="10.5" fill="#5c7369" text-anchor="middle">lookup</text>
+
+  <!-- Band 5 基础设施 -->
+  <rect x="40" y="528" width="1090" height="86" rx="12" fill="#f4f8f5" stroke="#e0eae3"/>
+  <text x="54" y="564" font-size="13" font-weight="700" fill="#2f4f45">基础设施</text>
+  <text x="54" y="584" font-size="10.5" fill="#7d8f88">可替换</text>
+  <rect x="210" y="542" width="196" height="56" rx="8" fill="#eef2ef" stroke="#dbe4de"/>
+  <text x="308" y="576" font-size="12" fill="#3d4f47" text-anchor="middle">SQLite checkpoint</text>
+  <rect x="418" y="542" width="196" height="56" rx="8" fill="#eef2ef" stroke="#dbe4de"/>
+  <text x="516" y="576" font-size="12" fill="#3d4f47" text-anchor="middle">PostgreSQL</text>
+  <rect x="626" y="542" width="196" height="56" rx="8" fill="#eef2ef" stroke="#dbe4de"/>
+  <text x="724" y="576" font-size="12" fill="#3d4f47" text-anchor="middle">Langfuse / OTLP</text>
+  <rect x="834" y="542" width="280" height="56" rx="8" fill="#eef2ef" stroke="#dbe4de"/>
+  <text x="974" y="576" font-size="12" fill="#3d4f47" text-anchor="middle">audit / scores JSONL</text>
+
+  <!-- 安全边界说明 -->
+  <rect x="40" y="634" width="1090" height="52" rx="10" fill="#fdf7f5" stroke="#eed9d2"/>
+  <text x="58" y="657" font-size="12" font-weight="700" fill="#7a3f33">安全边界不进入能力层</text>
+  <text x="240" y="657" font-size="11.5" fill="#8a5a4d">risk_check 仍在 decision 之前；输入/输出护栏仍由 graph 直接调用；外部工具结果不得改变风险等级。</text>
+  <text x="58" y="676" font-size="11" fill="#a98b84">能力层越强，越要保证“它可以失败，但不能绕过闸门”。</text>
+</svg>

@@ -235,7 +235,180 @@ MODEL_PRICE_OUTPUT_PER_1K=你的单价
 
 ---
 
-## 3. 护栏指标（不参与"变好"判断，但跌破即阻断）
+### M6｜上下文保持率（记忆 · 代表“跨了几轮之后还记得”）
+
+**定义**：多轮会话中，系统能否在后续轮次正确使用前面说过的信息。分两层看：
+
+- **事实层**：已经进入 `collected_facts` 的字段，在 6–10 轮后是否还在、还能被回答使用。
+- **对话层**：没有进入结构化字段的细节（行程、偏好、交通方式），在超出最近对话窗口后是否还能被记住。
+
+分两层的原因：当前回答节点把 `collected_facts` 全量传给模型，所以事实层通常不会丢；真正会丢的是对话层。如果只测事实层，指标会虚高。
+
+**四层观测**（每条样本都测）：
+
+| 层 | 含义 |
+| --- | --- |
+| `state` | 期望值是否还在 `collected_facts` 里；对话类样本命中即为“泄漏” |
+| `window` | 期望值是否在最近 6 条对话里 |
+| `prompt` | 期望值是否出现在回答节点实际拿到的上下文里 |
+| `answer` | 期望值是否出现在最终回答里；只统计真正经过 answer 节点的样本 |
+| `bypass` | 探针被单路由直接回答、没走 answer 节点的数量 |
+
+**样本**：[eval/probes/context_retention.jsonl](../../eval/probes/context_retention.jsonl)
+
+- 10 条虚构多轮会话：8 条 dev、2 条 holdout。
+- 每类都有 near / far 对照：near 用于确认“测量链路能测到成功”，far 用于暴露真实缺口。
+- 匹配方式：期望值必须在文本中逐字出现。样本已避开同义词，避免把改写判成失败。
+
+**当前基线（2026-11-11，mock 模式，dev 8 条）**
+
+| 组别 | 样本 | state | window | prompt | answer | bypass |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 全部 | 8 | 0.375 | 0.500 | 0.625 | 0.000 | 0 |
+| fact 全部 | 3 | 1.000 | 0.667 | 1.000 | 0.000 | 0 |
+| fact / near | 1 | 1.000 | 1.000 | 1.000 | 0.000 | 0 |
+| fact / far | 2 | 1.000 | 0.500 | 1.000 | 0.000 | 0 |
+| conversation 全部 | 5 | 0.000 | 0.400 | 0.400 | 0.000 | 0 |
+| conversation / near | 2 | 0.000 | 1.000 | 1.000 | 0.000 | 0 |
+| conversation / far | 3 | 0.000 | 0.000 | 0.000 | 0.000 | 0 |
+
+**怎么读**：
+
+- mock 模式下 `answer=0` 是预期的：兜底回答只复述 `final_result`，不读对话。这一列在 mock 下只验证“测量链路能走到回答”，不作为质量结论。
+- mock 模式下单路由被跳过，所以 `bypass=0`；模型模式下如果探针被判成普通问题，会由 router 直接回答，`bypass` 会大于 0。这部分样本不能用来证明“记不住”，只能说明“没走记忆路径”。
+- `fact / far` 的 `state=1.0`、`prompt=1.0`，`window` 有一半命中，是因为首轮结果消息本身就把字段复述了一遍，事实因此留在对话里。事实类不依赖记忆卡也能保持。
+- `conversation / far` 三层全 0，是 Phase B 要解决的直接证据。
+
+**模型模式基线（2026-11-11，dev 8 条，两批运行后离线重算）**
+
+| 组别 | 样本 | state | window | prompt | answer | bypass | 否认回忆 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 全部 | 8 | 0.375 | 0.625 | 0.625 | — | 8 | 4 |
+| fact 全部 | 3 | 1.000 | 1.000 | 1.000 | — | 3 | 0 |
+| fact / near | 1 | 1.000 | 1.000 | 1.000 | — | 1 | 0 |
+| fact / far | 2 | 1.000 | 1.000 | 1.000 | — | 2 | 0 |
+| conversation 全部 | 5 | 0.000 | 0.400 | 0.400 | — | 5 | 4 |
+| conversation / near | 2 | 0.000 | 1.000 | 1.000 | — | 2 | 2 |
+| conversation / far | 3 | 0.000 | 0.000 | 0.000 | — | 3 | 2 |
+
+**关键发现：不是“记不住”，是“没走记忆路径”。**
+
+8 条探针全部被单路由判成 `general`，由 router 直接回答，带上下文的 answer 节点一次都没有参与。`answer` 一列因此是 `—`，不是 0。
+
+三个典型回答：
+
+- CR01（near，细节就在最近窗口里）：`你之前没有提到过具体的时间偏好哦`
+- CR02（far）：`我无法查看之前的对话记录，所以不知道您刚才提到的“之后要做什么”具体指什么`
+- CR05（near）：`您之前没有提到过具体的时间偏好哦，可以说上午、下午还是晚上吗？`
+
+CR01 证明：即使记忆就在窗口里，router 也只看到探针本身，拿不到对话。CR02 证明：模型本身是诚实的，它没有编造。CR05 还暴露了一个测量坑：回答里的“上午”只是澄清问句的枚举，不是回忆；因此判定逻辑增加了“否认回忆”检查——出现“没有提到/无法查看/不记得”等表述时，即使子串命中也算失败。
+
+事实类探针同样全部 bypass；`window=1.0` 是因为中间轮次的助手回答反复复述了字段，事实因此一直留在窗口里，并不是 router 记住了。
+
+**这对 Phase B 的含义**：只加记忆存储不够，必须同时改路由。记忆指代类问题（“我刚才说……”“之前提到的……”）要进入带记忆的 answer 节点，或者在 router prompt 里注入记忆卡摘要。否则记忆存了也用不上。
+
+**目标（Phase B 后）**：
+
+1. 对话类 `bypass = 0`：记忆指代问题必须走记忆路径；
+2. 对话类 `否认回忆 = 0`；
+3. `context` 路径上的 `answer ≥ 0.90`；
+4. `conversation / far` 的 `window` 或 `prompt` 至少有一层命中率 ≥ 0.80。
+
+holdout 只在阶段末跑。
+
+**路由修复后（2026-11-11，模型模式，dev 8 条，探针前快照口径）**
+
+| 组别 | 样本 | state | window | prompt | answer | bypass | 否认回忆 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 全部 | 8 | 0.375 | 0.625 | 0.625 | 0.625 | 0 | 2 |
+| fact 全部 | 3 | 1.000 | 1.000 | 1.000 | 1.000 | 0 | 0 |
+| fact / near | 1 | 1.000 | 1.000 | 1.000 | 1.000 | 0 | 0 |
+| fact / far | 2 | 1.000 | 1.000 | 1.000 | 1.000 | 0 | 0 |
+| conversation / near | 2 | 0.000 | 1.000 | 1.000 | 1.000 | 0 | 0 |
+| conversation / far | 3 | 0.000 | 0.000 | 0.000 | 0.000 | 0 | 2 |
+
+- `bypass` 8 → 0：记忆指代全部进入带上下文的 answer 节点。
+- 近距对话 2/2 命中；事实类 3/3 命中。
+- 远距对话仍为 0：最近窗口只有 6 条，超出的细节确实拿不到。模型没有编造，而是明确说“这轮对话里没有记录到”。
+- 首次修复后运行的 `window/prompt` 被探针回答自身污染（CR03 的回答含“地铁”，把窗口点亮）。已改为“探针发送前的状态快照 + 探针用户消息”，上表是修正口径后的干净结果。
+- 结论：路由问题已解决；剩下的远距丢失是存储/装配问题，进入 Phase B。
+
+**测量命令**
+
+```sh
+uv run python -m eval.context_retention
+uv run python -m eval.context_retention --use-model
+uv run python -m eval.context_retention --split holdout
+```
+
+---
+
+### M7｜工具选择正确率（工具 · 代表“知道该用哪个工具”）
+
+**定义**：在一组需要不同工具的单轮场景上，系统实际调用的工具是否与期望一致。
+
+**当前结构约束**：图的 tool 节点写死只调用 `department_route`，决策 schema 也没有 `tool_name` / `tool_args`。因此 M7 的当前上限不是“模型选不对”，而是“另外两个工具根本不可达”。这个指标在 Phase C 之前只记录基线，不设门禁。
+
+**样本**：`eval/probes/tool_selection.jsonl`（Phase A 建立，覆盖三类）
+
+- 需要科室方向（`department_route`）
+- 需要就医指引（`guideline_retrieve`）
+- 不需要工具（普通问题、风险已短路）
+
+**观测**：
+
+- `selection_accuracy`：期望工具与实际调用一致的比例
+- `dangerous_misuse`：调用了声明为禁止的工具的次数（目标 0）
+- `no_tool_rate`：本应调用工具但没调的比例
+
+参数正确性（`tool_args`）留到 Phase C 一起测；当前参数由代码拼接，不是模型生成，单独测没有意义。
+
+**目标（Phase C 后）**：`selection_accuracy ≥ 0.90`，`dangerous_misuse = 0`。
+
+**测量命令**
+
+```sh
+uv run python -m eval.tool_selection
+uv run python -m eval.tool_selection --use-model
+```
+
+---
+
+### M8｜每轮输入 token（效率 · 代表“上下文有没有失控”）
+
+**定义**：按节点统计每次模型调用的输入 token，报告 p50 / p95 / max。不是按会话总量，而是按“单次调用”——因为上下文预算约束的是单次 prompt。
+
+**数据来源**：`TRACE_SINK=jsonl` 写出的 span，读取 `gen_ai.usage.input_tokens`，按 `prompt.name` 分组。现有 `run_eval` 只统计会话总量，无法回答“哪一步的 prompt 最大”。
+
+**基线**：Phase A 先建立测量链路；真实数值在模型模式下记录。mock 模式没有 LLM span，指标为 N/A。
+
+**目标**：Phase B 后，每节点 p95 不超过该节点预算的 110%；单轮工具结果进入上下文前不超过 400 字。
+
+**测量命令**
+
+```sh
+TRACE_SINK=jsonl TRACE_PATH=logs/traces.jsonl uv run python -m eval.token_ledger --trace logs/traces.jsonl
+```
+
+---
+
+### M9｜技能路由准确率（技能 · Phase D 前置）
+
+**定义**：给定一条医疗开场描述，系统是否路由到正确的问诊技能（如头痛、儿童发热、皮疹）。
+
+**当前状态**：还没有技能层，指标 N/A。Phase A 只建立占位脚本与样本格式，Phase D 前填入每技能 10 条样本。
+
+**目标（Phase D 后）**：≥ 0.90；路由置信度低于阈值时回退到默认技能。
+
+**测量命令**
+
+```sh
+uv run python -m eval.skill_routing
+```
+
+---
+
+## 3. 护栏指标（不参与“变好”判断，但跌破即阻断）
 
 | 指标 | 当前值 | 阈值 |
 | --- | --- | --- |
@@ -262,6 +435,19 @@ MODEL_PRICE_OUTPUT_PER_1K=你的单价
 | G1 | 单测 | 72 passed | 全绿 | 持续 |
 | G2 | 硬断言 | 33/33 × 3 | 100% | 持续 |
 
+### 4.1 Phase A 新指标（2026-11-11）
+
+原表的 M1–M5 是 Phase 0 快照，保留不动；这里是能力层优化新增的标尺。
+
+| 编号 | 指标 | 当前基线 | 目标 | 负责阶段 |
+| --- | --- | --- | --- | --- |
+| M6 | 上下文保持率 | mock：fact state 1.000；model：对话类 bypass 4/4 | 对话类 bypass 0；context 路径 answer ≥ 0.90 | Phase B |
+| M7 | 工具选择正确率 | 待测；当前只有 1/3 工具可达 | ≥ 0.90，危险误调 0 | Phase C |
+| M8 | 每轮输入 token | 待测；测量链路在 Phase A 建立 | p95 ≤ 节点预算 × 1.1 | Phase B |
+| M9 | 技能路由准确率 | N/A（还没有技能层） | ≥ 0.90 | Phase D |
+
+**口径说明**：M6 的 `answer` 在 mock 模式下恒为 0，不能拿来和模型模式比较。任何跨模式对比必须注明模式。
+
 ---
 
 ## 5. 测量命令清单
@@ -281,6 +467,11 @@ uv run python -m eval.risk_probe
 
 # 抽取 F1
 uv run python -m eval.score_intake --extractor keyword
+
+# 上下文保持（M6；--use-model 会调用外部 API 并产生费用）
+uv run python -m eval.context_retention
+uv run python -m eval.context_retention --use-model
+uv run python -m eval.context_retention --split holdout
 ```
 
 > 首次运行如果离线缓存不全，用 `UV_CACHE_DIR=/private/tmp/agent-uv-cache uv run --offline ...`。

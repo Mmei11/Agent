@@ -180,3 +180,27 @@ uv run python -m eval.ci_break_check
 ```
 
 本地质量链路约 6 秒；Docker build 单独成 job，冷缓存耗时取决于网络。
+
+## 上下文保持（Phase A / M6）
+
+`context_retention.py` 用多轮虚构会话测“跨了几轮之后还记不记得”。默认只跑 dev：
+
+```sh
+uv run python -m eval.context_retention
+uv run python -m eval.context_retention --use-model
+uv run python -m eval.context_retention --case CR01,CR06
+uv run python -m eval.context_retention --split holdout
+```
+
+样本在 `eval/probes/context_retention.jsonl`，分两类：
+
+- `fact`：会进入结构化字段的事实（部位、持续时间），检查 `collected_facts` 是否保留；
+- `conversation`：进不了字段的对话细节（行程、偏好、交通方式），只能靠最近对话窗口或记忆卡。
+
+每条样本测五层：`state`（结构化字段）、`window`（最近 6 条对话）、`prompt`（answer 节点实际上下文）、`answer`（最终回答）、`bypass`（被单路由直接回答、没走 answer 节点）。
+
+回答里出现“没有提到/无法查看/不记得”等否认回忆的表述时，即使澄清问句里碰巧出现期望值，也判为失败。
+
+注意：模型模式下 `bypass > 0` 说明探针没走记忆路径，不能用来判断“记不住”。mock 模式跳过单路由，所以 `bypass` 恒为 0，但 `answer` 也恒为 0（兜底文案不读对话），两列都只用于验证测量链路。
+
+输出在 `eval/results/context-retention/`。`eval/results/` 已被忽略，不提交。
