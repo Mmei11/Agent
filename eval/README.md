@@ -260,3 +260,23 @@ uv run python -m eval.router_eval --split holdout
 ```
 
 样本在 `eval/probes/router_cases.jsonl`，默认只跑 dev。报告会按类别给出准确率，并列出被误判的消息。这个评测会调用真实模型，单次结果有波动。
+
+## 长会话保持（Phase B）
+
+`long_session.py` 用完整图跑 20–24 轮，检查滚动摘要是否真的保住早期细节。**必须用真实模型**：
+
+```sh
+uv run python -m eval.long_session --use-model
+uv run python -m eval.long_session --use-model --case LS01
+uv run python -m eval.long_session --use-model --split holdout
+```
+
+样本在 `eval/probes/long_session.jsonl`：LS01 24 轮 dev、LS02 20 轮 holdout。早期埋出差时间/时间偏好，中期用 8 条新细节把它们挤出 `details`，后期探针回问。
+
+报告记录：
+
+- `summary_updates`：摘要游标前进了几次；
+- `answer` / `summary` / `details` / `facts` / `window`：探针期望值出现在哪一层；
+- `summary=✓` 且 `details=✗` 才说明回答必须依赖滚动摘要。
+
+24 轮大约 50–70 次模型调用，耗时几分钟；适合阶段末或 nightly，不适合每次 PR。

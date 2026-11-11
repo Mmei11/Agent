@@ -386,6 +386,28 @@ holdout 只在阶段末跑。
 - 真实验证：14 轮合成对话 → 113 字摘要，599 输入 / 75 输出 token，覆盖症状、时间线、结论、行程、偏好、交通、社交来源和就诊准备。
 - 待补：>20 轮完整图会话的长期保持评测。M6 当前最长 8 轮，不会触发摘要。
 
+**长会话保持（>20 轮完整图，2026-11-11 建立）**
+
+- 样本：`eval/probes/long_session.jsonl`，LS01 24 轮 dev、LS02 20 轮 holdout。
+- 设计：早期埋出差时间/时间偏好，中期用 8 条新细节把早期细节挤出 `details`，后期探针回问；这样回答只能依赖滚动摘要。
+- 观测：`answer_hit`、`summary_hit`、`details_hit`、`facts_hit`、`window_hit`、`summary_updates`。
+- 目标：`answer_hit ≥ 0.90`；早期细节在 `summary` 中保留；24 轮脚本至少 2 次摘要更新。
+- 命令：
+
+```sh
+uv run python -m eval.long_session --use-model
+uv run python -m eval.long_session --use-model --split holdout
+```
+
+- LS01 结果（2026-11-11，v2 干净口径）：**3/3 探针命中**，摘要更新 3 次，最终摘要 148 字。
+  - 第 12 轮（下周三）与第 18 轮（下午）均为 `summary=✓ / details=✗ / window=✗`，证明回答只能依赖滚动摘要；
+  - 第 24 轮（前额/两天）`summary=✓ / facts=✓`，作为对照通过。
+- LS02 holdout 结果（2026-11-11）：**3/3 探针命中**，摘要更新 2 次，最终摘要 116 字。
+  - 第 11 轮（下个月）：`summary=✓ / details=✓ / window=✗`；
+  - 第 16 轮（上午）：`summary=✓ / details=✗ / window=✗`，证明只能依赖摘要；
+  - 第 20 轮（腹部/三天）：`summary=✓ / facts=✓`。
+- 结论：LS01 dev 3/3、LS02 holdout 3/3。单次运行，阶段末仍需重复 3 次确认稳定性。
+
 **测量命令**
 
 ```sh

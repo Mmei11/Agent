@@ -15,6 +15,7 @@ from backend.app.agent.memory_ref import is_memory_reference
         "刚才那句话是什么",
         "我提的是哪里",
         "您还记得我说的时间吗",
+        "我最早说的部位是什么",
     ],
 )
 def test_recognizes_memory_reference(text):

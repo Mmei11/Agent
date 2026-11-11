@@ -197,7 +197,7 @@
 
 ### Phase B｜上下文装配与会话记忆（4–6 天）
 
-> 进展（2026-11-11）：记忆指代路由已修；会话记忆卡（`memory/session_memory.py`）、字符预算（`context/budget.py`）与 answer 上下文装配（`context/assembler.py`）已落地，prompt 升到 v5。M6 模型复测：远距对话 `answer` 0.000 → 1.000、`prompt` 0 → 1.000，`window` 仍为 0.333，说明信息来自记忆卡而非更大窗口。decision 已接入参考上下文（prompt v2）；intake 保持解析器边界，只吃本轮原话。M1 在当前模型下重测为 **0.877**（旧 0.9325 已不可比）；参考上下文与字段归属 guidance 均未带来稳定提升，已回退到 v2。新增只读导出视图 `GET /sessions/{id}/memory`（结构化 + Markdown）与前端「查看记忆」弹层。另新增 M11 general/medical 路由评测：router v2 修正饮食/生活方式误判，dev 与 holdout 均 1.000。长会话滚动摘要已落地：最近窗口外累计 12 条触发、摘要 ≤300 字、失败保留旧摘要并重试；记忆卡 8×90 细节 + 300 字摘要，最坏约 1.44K 字符。剩余：按技能的记忆隔离、>20 轮长期保持评测。剩余：长会话滚动摘要、按技能的记忆隔离。
+> 进展（2026-11-11）：记忆指代路由已修；会话记忆卡（`memory/session_memory.py`）、字符预算（`context/budget.py`）与 answer 上下文装配（`context/assembler.py`）已落地，prompt 升到 v5。M6 模型复测：远距对话 `answer` 0.000 → 1.000、`prompt` 0 → 1.000，`window` 仍为 0.333，说明信息来自记忆卡而非更大窗口。decision 已接入参考上下文（prompt v2）；intake 保持解析器边界，只吃本轮原话。M1 在当前模型下重测为 **0.877**（旧 0.9325 已不可比）；参考上下文与字段归属 guidance 均未带来稳定提升，已回退到 v2。新增只读导出视图 `GET /sessions/{id}/memory`（结构化 + Markdown）与前端「查看记忆」弹层。另新增 M11 general/medical 路由评测：router v2 修正饮食/生活方式误判，dev 与 holdout 均 1.000。长会话滚动摘要已落地：最近窗口外累计 12 条触发、摘要 ≤300 字、失败保留旧摘要并重试；记忆卡 8×90 细节 + 300 字摘要，最坏约 1.44K 字符。新增长会话评测 LS01（24 轮 dev）与 LS02（20 轮 holdout），**两套均 3/3 探针命中**，且第 12/16 轮为 `summary=✓ / details=✗ / window=✗`。剩余：按技能的记忆隔离、阶段末重复采样。剩余：长会话滚动摘要、按技能的记忆隔离。
 
 **工程问题：** 每个节点各自拼 prompt，没有统一预算；intake 和 decision 看不到对话原文；对话只增不减。接入工具和技能后，prompt 会从"小而准"变成"大而杂"。
 
