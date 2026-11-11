@@ -62,3 +62,68 @@ class DecisionChoice(BaseModel):
         min_length=1, max_length=200, description="选择这个动作的依据，引用字段或原话片段"
     )
     confidence: float = Field(ge=0, le=1, description="自评置信度，依据不足时如实给低分")
+
+
+class ReplySuggestions(BaseModel):
+    """追问的快捷回答候选：用户可以直接点选，也可以自由输入。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    replies: list[str] = Field(
+        min_length=1,
+        max_length=5,
+        description="2 到 10 字的候选回答，不能重复已收集的信息",
+    )
+
+
+class FollowupAnswer(BaseModel):
+    """问诊结果生成后，对用户继续提问的自然语言回答。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    answer: str = Field(
+        min_length=1,
+        max_length=400,
+        description="根据已有事实与结果回答，不新增诊断或用药建议",
+    )
+    grounded: bool = Field(
+        description="回答是否使用了 final_result 中的就诊方向/风险提示/知识库来源；纯通用常识为 false"
+    )
+
+
+class DrugAnswer(BaseModel):
+    """L1 药品说明书回答：模型只写简短回应并选择要展示的段落。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    intro: str = Field(
+        min_length=1,
+        max_length=200,
+        description="1 到 3 句回应，只复述说明书内容，不判断个人适用性",
+    )
+    sections: list[
+        Literal[
+            "indications",
+            "contraindications",
+            "precautions",
+            "adverse_reactions",
+            "interactions",
+        ]
+    ] = Field(
+        min_length=1,
+        max_length=3,
+        description="回答这个问题需要展示的说明书段落",
+    )
+
+
+class RoutedReply(BaseModel):
+    """路由结果：普通问题直接带回答，医疗问题只返回 intent。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    intent: Literal["medical", "general"]
+    answer: str = Field(
+        default="",
+        max_length=300,
+        description="intent=general 时的简短自然回答；医疗问题留空",
+    )

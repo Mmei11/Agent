@@ -161,17 +161,40 @@ def test_tool_timeout_returns_structured_error(monkeypatch):
     assert "执行超过" in data["rendered_text"]
 
 
-def test_risk_session_is_terminal_and_new_case_is_independent():
+def test_risk_session_can_be_followed_up_and_new_case_is_independent():
     risk = client.post("/sessions", json={"initial_message": "模拟人物突然呼吸困难"}).json()
     risk_id = risk["session_id"]
     assert risk["final_result"]["status"] == "risk_route"
-    assert client.post(f"/sessions/{risk_id}/messages", json={"message": "头部不适"}).status_code == 409
+
+    follow = client.post(f"/sessions/{risk_id}/messages", json={"message": "那现在该怎么办"})
+    assert follow.status_code == 200
+    followed = follow.json()
+    # 继续追问不覆盖原来的风险结果，回答追加到对话里。
+    assert followed["final_result"]["status"] == "risk_route"
+    assert len(followed["conversation"]) == 4
 
     normal = client.post("/sessions", json={"initial_message": "头部不适两天，前额，程度轻，暂无其他不适，无病史"}).json()
     assert normal["session_id"] != risk_id
     assert normal["risk_flags"] == []
     assert normal["final_result"]["status"] == "completed"
     assert len(normal["conversation"]) == 2
+
+
+def test_finished_session_accepts_followup_in_same_session():
+    created = client.post(
+        "/sessions",
+        json={"initial_message": "头部不适两天，前额，程度轻，暂无其他不适，无病史"},
+    ).json()
+    sid = created["session_id"]
+
+    follow = client.post(
+        f"/sessions/{sid}/messages", json={"message": "那需要注意什么"}
+    ).json()
+
+    assert follow["session_id"] == sid
+    assert follow["turn_id"] == 2
+    assert len(follow["conversation"]) == 4
+    assert follow["final_result"]["status"] == "completed"
 
 
 def test_conversation_restores_from_sqlite():

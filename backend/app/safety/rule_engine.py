@@ -12,6 +12,20 @@ RISK_KEYWORDS = [
     "胸口剧烈疼",
     "胸口剧痛",
     "胸痛",
+    "心脏爆痛",
+    "心脏剧痛",
+    "心脏痛",
+    "心脏疼",
+    "心前区疼痛",
+    "心前区剧痛",
+    "胸口爆痛",
+    "呼吸停止",
+    "停止呼吸",
+    "呼吸骤停",
+    "不能呼吸",
+    "无法呼吸",
+    "呼吸费力",
+    "呼吸吃力",
     "意识丧失",
     "意识不清",
     "大量出血不止",
@@ -89,6 +103,29 @@ NEGATION_WINDOW = 5
 # 否定只在本小句内生效，跨过标点就不再算同一个否定
 CLAUSE_MARKS = "，。；！？,.;!?、\n"
 
+# 词与词之间允许插入“现在/有点/一阵”等修饰，但不能跨标点。
+# 命中后再检查片段里有没有否定词，避免“心脏没有爆痛”被误判。
+COMPOUND_RISK_PATTERNS = (
+    (
+        "心脏/胸口剧痛",
+        re.compile(
+            r"(?:心脏|胸口|心前区)[^，。；\n]{0,5}(?:爆痛|剧痛|剧烈疼痛|压榨)"
+        ),
+    ),
+    (
+        "呼吸停止",
+        re.compile(r"呼吸[^，。；\n]{0,4}(?:停止|停了|骤停)"),
+    ),
+    (
+        "停止呼吸",
+        re.compile(r"(?:停止|停了|骤停)[^，。；\n]{0,3}呼吸"),
+    ),
+    (
+        "呼吸费力",
+        re.compile(r"呼吸[^，。；\n]{0,3}(?:费力|吃力)"),
+    ),
+)
+
 # 这些词里的"不/没"是词的一部分，不是否定词
 NON_NEGATION_COMPOUNDS = ("不适", "不舒服", "不得劲", "无力", "不固定")
 
@@ -162,6 +199,19 @@ def screen(message: str) -> dict:
                 "rule": "R001",
                 "reason": f"命中风险词：{keyword}",
             }
+
+    # 组合模式：允许“心脏现在爆痛”“呼吸有点停止”这类插入修饰。
+    for label, pattern in COMPOUND_RISK_PATTERNS:
+        for match in pattern.finditer(text):
+            fragment = match.group(0)
+            if any(neg in fragment for neg in NEGATION_WORDS):
+                continue
+            if not check_negation(text, match.start()):
+                return {
+                    "level": "risk",
+                    "rule": "R001",
+                    "reason": f"命中风险组合：{label}",
+                }
 
     # 第二层：检查含糊表述词
     for keyword in VAGUE_RISK_KEYWORDS:

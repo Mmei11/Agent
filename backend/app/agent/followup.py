@@ -1,5 +1,7 @@
 """Day 7：动态追问生成。基于缺失字段、已问问题和字段优先级，选一个最有价值的问题。案例均为虚构。"""
 
+import os
+
 from backend.app.agent.state import ConsultationState
 from backend.app.observability import current_trace
 
@@ -25,6 +27,7 @@ QUESTION_TEMPLATES = {
 
 
 # 字段对应的追问快捷选项；用户可点选，仍允许自由输入。
+# 这是没有模型时的兜底，模型模式下会结合已收集信息重新生成。
 REPLY_OPTIONS = {
     "主要症状": ["头部不适", "腹痛", "发热"],
     "持续时间": ["一天内", "两三天", "一周以上"],
@@ -33,6 +36,75 @@ REPLY_OPTIONS = {
     "程度": ["轻微", "明显", "严重"],
     "已知背景": ["无病史", "有慢性病", "正在用药"],
 }
+
+MAX_REPLIES = 3
+MAX_REPLY_CHARS = 12
+
+
+def _known_fragments(state: ConsultationState) -> list[str]:
+    return [
+        str(value).strip()
+        for values in state.collected_facts.values()
+        for value in values
+        if str(value).strip()
+    ]
+
+
+def clean_replies(candidates: list, state: ConsultationState) -> list[str]:
+    """去噪、去重，并丢掉用户已经说过的信息。
+
+    例如主要症状已经写了"头部不适"，部位选项里的"头部"就没有意义。
+    """
+    known = _known_fragments(state)
+    cleaned = []
+    for candidate in candidates:
+        reply = str(candidate).strip().strip("。！？!?，,、；;：: ")
+        if not reply or len(reply) > MAX_REPLY_CHARS or "\n" in reply:
+            continue
+        if any(reply in value for value in known):
+            continue
+        if reply in cleaned:
+            continue
+        cleaned.append(reply)
+        if len(cleaned) >= MAX_REPLIES:
+            break
+    return cleaned
+
+
+def suggest_replies(
+    state: ConsultationState, field: str | None, question: str
+) -> tuple[list[str], dict]:
+    """优先让模型结合已收集信息生成候选；失败或未启用时回退静态选项。
+
+    返回（候选回答, 来源与用量）；来源写进 trace，便于比较模型与兜底的比例。
+    """
+    fallback = clean_replies(REPLY_OPTIONS.get(field) or [], state)
+    if field is None or os.getenv("USE_MODEL") != "1":
+        return fallback, {"source": "static"}
+
+    from backend.app.agent.followup_llm import generate_with_meta
+    from backend.app.llm.client import LLMError
+
+    try:
+        suggestions, usage = generate_with_meta(state, field, question)
+    except LLMError:
+        # 追问生成本身不能打断问诊；静态选项至少保证用户还能点。
+        return fallback, {"source": "fallback", "reason": "model_error"}
+
+    replies = clean_replies(suggestions.replies, state)
+    if not replies:
+        return fallback, {"source": "fallback", "reason": "all_filtered"}
+
+    return replies, {
+        "source": "model",
+        "usage": {
+            "model": usage.model,
+            "input_tokens": usage.input_tokens,
+            "output_tokens": usage.output_tokens,
+            "latency_ms": usage.latency_ms,
+            "cost_estimate": usage.cost_estimate,
+        },
+    }
 
 
 def select_next_field(missing_fields: list, asked_questions: list) -> str | None:
@@ -67,19 +139,21 @@ def followup(state: ConsultationState) -> dict:
     """
     field = select_next_field(state.missing_fields, state.asked_questions)
     question = generate_question(field)
+    replies, reply_meta = suggest_replies(state, field, question)
     scope = current_trace()
 
     return {
         "followup_count": state.followup_count + 1,
         "asked_questions": [question],
         "conversation": [{"role": "agent", "text": question}],
-        "suggested_replies": list(REPLY_OPTIONS.get(field, [])),
+        "suggested_replies": replies,
         "trace": [
             {
                 "node": "followup",
                 "selected_field": field,
                 "count": state.followup_count + 1,
                 "trace_id": scope.trace_id if scope else "",
+                "reply_meta": reply_meta,
                 # 问句本身已在 asked_questions 和 conversation 里，不重复存。
             }
         ],

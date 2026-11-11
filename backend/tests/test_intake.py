@@ -6,6 +6,7 @@ import pytest
 
 from backend.app.agent.intake import (
     compute_missing,
+    extract_absence_phrase,
     extract_facts,
     extract_facts_auto,
     intake,
@@ -53,8 +54,66 @@ def test_vague_description():
 def test_negation():
     """否定句：'暂无其他不适' 提取为伴随表现，不当作缺失。"""
     facts = extract_facts("头部不适，暂无其他不适")
-    assert "伴随表现" in facts
-    assert "暂无" in facts["伴随表现"]
+    assert facts["伴随表现"] == ["暂无其他不适"]
+
+
+def test_complete_case_is_not_missing_associated():
+    """回归：信息足够案例里说了'暂无其他不适'，不应再缺伴随表现。"""
+    facts = extract_facts("头部不适两天，前额，程度轻，暂无其他不适，无病史")
+    assert compute_missing(facts) == []
+
+
+@pytest.mark.parametrize(
+    "phrase",
+    ["暂无其他不适", "没有其他不适", "无其它不适", "没有其他症状", "无明显不适", "没有任何不舒服"],
+)
+def test_blanket_negation_variants(phrase):
+    """各种"否认全部伴随症状"的说法都算已收集。"""
+    assert extract_facts(f"头部不适，{phrase}")["伴随表现"] == [phrase]
+
+
+def test_specific_negation_is_not_blanket():
+    """只否认某一个症状时，不能把整个伴随表现字段标成已收集。"""
+    assert extract_absence_phrase("头部不适，暂无发热") is None
+
+
+def test_positive_associated_wins_over_blanket_negation():
+    """已经说了有伴随症状，就不再追加"无其他不适"。"""
+    assert extract_facts("头部不适，有恶心，暂无其他不适")["伴随表现"] == ["恶心"]
+
+
+def test_llm_path_restores_blanket_negation(monkeypatch):
+    """模型把否定表达丢掉后，抽取层仍要把"暂无其他不适"补回伴随表现。"""
+    from backend.app.agent import intake_llm
+
+    usage = SimpleNamespace(
+        model="fake",
+        input_tokens=1,
+        output_tokens=1,
+        latency_ms=1,
+        cost_estimate=0.0,
+    )
+
+    def fake_extract(_text):
+        return (
+            {
+                "主要症状": ["头部不适"],
+                "持续时间": ["两天"],
+                "部位": ["前额"],
+                "程度": ["轻"],
+                "已知背景": ["无病史"],
+            },
+            {},
+            usage,
+        )
+
+    monkeypatch.setenv("USE_MODEL", "1")
+    monkeypatch.setattr(intake_llm, "extract_facts_with_meta", fake_extract)
+
+    facts, evidence = extract_facts_auto("头部不适两天，前额，程度轻，暂无其他不适，无病史")
+
+    assert facts["伴随表现"] == ["暂无其他不适"]
+    assert evidence["伴随表现"] == ["暂无其他不适"]
 
 
 def test_empty_input():

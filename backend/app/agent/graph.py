@@ -21,6 +21,8 @@ from backend.app.agent.result import (
     render_text,
 )
 from backend.app.agent.state import ConsultationState  # 状态类型
+from backend.app.agent.opening import route_general  # 未出结果时的普通/医疗预路由
+from backend.app.agent.answer import answer_followup  # 结果生成后的追问回答
 from backend.app.observability import current_trace, span, traced_node
 from backend.app.safety.audit import AuditEvent, input_digest, write as write_audit
 from backend.app.safety.output_rail import check as check_output
@@ -97,10 +99,17 @@ def risk_check(state: ConsultationState) -> dict:
 
 
 def route_after_risk(state: ConsultationState) -> str:
-    """命中风险或含糊直接走向输出；否则进入正常决策。"""
+    """命中风险或含糊直接走向输出；已有结果时进入追问回答；否则先预路由。"""
     if state.risk_flags:
         return "output"
-    return "decision"
+    if state.turn_kind == "followup":
+        return "answer"
+    return "general_route"
+
+
+def route_after_general(state: ConsultationState) -> str:
+    """预路由结果：普通问题结束本轮，医疗问题回到字段决策。"""
+    return "general" if state.next_action == "GENERAL" else "medical"
 
 
 def decision(state: ConsultationState) -> dict:
@@ -307,19 +316,27 @@ def build_graph(checkpointer=None):
     # 注册六个节点：埋点包在注册处，节点函数本身保持纯业务逻辑。
     graph.add_node("intake", traced_node("intake")(intake))  # 入口：提取字段
     graph.add_node("risk_check", traced_node("risk_check")(risk_check))  # 风险检查
+    graph.add_node("general_route", route_general)  # 普通/医疗预路由；模型调用自带 span
     graph.add_node("decision", traced_node("decision")(decision))  # 决策：模型或预设选动作
     graph.add_node("followup", traced_node("followup")(followup))  # 追问：选字段生成问题
     graph.add_node("tool", traced_node("tool")(tool))  # 工具：调注册表里的受限工具
     graph.add_node("output", traced_node("output")(output))  # 输出：渲染最终结果
+    graph.add_node("answer", traced_node("answer")(answer_followup))  # 追问回答
 
     # 连边
     graph.add_edge(START, "intake")  # 起点 → 入口
     graph.add_edge("intake", "risk_check")  # 入口 → 风险检查（固定顺序）
-    graph.add_conditional_edges("risk_check", route_after_risk)  # 风险检查后分路：命中→output，未命中→decision
+    graph.add_conditional_edges("risk_check", route_after_risk)  # 风险→output；追问→answer；否则→general_route
+    graph.add_conditional_edges(
+        "general_route",
+        route_after_general,
+        {"general": END, "medical": "decision"},
+    )
     graph.add_conditional_edges("decision", route_after_decision)  # 决策后分路：追问/工具/输出
     graph.add_edge("followup", END)  # 一次请求只追问一次，等待用户下一轮回答
     graph.add_edge("tool", "decision")  # 工具 → 回到决策（循环）
     graph.add_edge("output", END)  # 输出 → 结束
+    graph.add_edge("answer", END)  # 追问回答 → 结束
 
     return graph.compile(checkpointer=checkpointer)  # 编译图，传入 checkpointer 启用持久化
 

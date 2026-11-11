@@ -14,7 +14,44 @@ NEGATION_PREFIXES = ("没有", "无明显", "未出现", "否认", "不是")
 
 # 观测用的 prompt 标识：改 prompt 时同步升版本，才能按版本对比指标。
 PROMPT_NAME = "intake.extract"
-PROMPT_VERSION = "v1"
+PROMPT_VERSION = "v2"
+
+# “加重缓解因素”只接受带这些线索的原文片段；单纯提到吃药/治疗不算。
+FACTOR_CUES = (
+    "加重",
+    "缓解",
+    "更疼",
+    "更痛",
+    "更明显",
+    "减轻",
+    "好转",
+    "好多了",
+    "就胀",
+    "就喘",
+    "就反酸",
+    "弯腰",
+    "站起来",
+    "爬",
+    "走路",
+    "活动",
+    "运动",
+    "休息",
+    "饭后",
+    "空腹",
+    "夜里",
+    "早上",
+    "白天",
+    "天气",
+    "低头",
+    "抬头",
+    "转头",
+    "久坐",
+    "久站",
+    "咳嗽",
+    "打喷嚏",
+    "吃药后",
+    "服药后",
+)
 
 SYSTEM_PROMPT = """你是"模拟问诊"项目的信息抽取器。用户会给你一句虚构病例描述。
 你只做信息抽取，不做诊断，不建议科室，不给用药。
@@ -43,7 +80,9 @@ SYSTEM_PROMPT = """你是"模拟问诊"项目的信息抽取器。用户会给�
 5. 起病时间归 duration（如"今天早上开始的"）；发作规律和频次归 pattern
    （如"一阵一阵""晚上更疼""拉了四五次"）。
 6. 用户拒答、无法描述、只给背景时，所有字段返回 []。
-7. 只输出 JSON，不要 Markdown、解释或额外字段。"""
+7. value 也必须是原文中连续出现的片段；不能输出原文没有的词或归纳结论。
+   例如用户说"吃了药还是疼"，不能输出 value="缓解"。
+8. 只输出 JSON，不要 Markdown、解释或额外字段。"""
 
 
 def _is_negated(text: str, fact, field: str) -> bool:
@@ -59,14 +98,19 @@ def _is_negated(text: str, fact, field: str) -> bool:
 
 
 def keep_supported(facts: IntakeFacts, text: str) -> IntakeFacts:
-    """三道闸门：证据逐字存在、不被否定；空列表表示作废。"""
+    """三道闸门：证据逐字存在、value 也在原文、不被否定；空列表表示作废。"""
     cleaned = {}
     for field in FIELD_MAP:
         kept = []
         for fact in getattr(facts, field):
             evidence = fact.evidence.strip()
+            value = fact.value.strip()
             if not evidence or evidence not in text:
                 continue  # 证据不在原文里 → 编造，丢弃
+            if not value or value not in text:
+                continue  # value 不在原文里 → 把归纳结论当事实，丢弃
+            if field == "aggravating" and not any(cue in value for cue in FACTOR_CUES):
+                continue  # 只是“吃了某种药”，不是加重/缓解因素
             if _is_negated(text, fact, field):
                 continue  # 证据被否定 → 不计入
             kept.append(fact)

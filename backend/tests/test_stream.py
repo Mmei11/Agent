@@ -119,13 +119,24 @@ def test_stream_empty_message_400():
     assert stream(client, sid, "   ").status_code == 400
 
 
-def test_stream_finished_session_409():
+def test_stream_finished_session_accepts_followup():
+    """已经出结果后继续发送，流式返回追问回答，结果保持不变。"""
     sid = client.post(
         "/sessions",
         json={"initial_message": "头部不适两天，前额，程度轻，暂无其他不适，无病史"},
     ).json()["session_id"]
 
-    assert stream(client, sid, "再补充一句").status_code == 409
+    response = stream(client, sid, "再补充一句")
+    assert response.status_code == 200
+
+    events = read_events(response)
+    result = next(item["data"] for item in events if item["event"] == "result")
+    assert result["final_result"]["status"] == "completed"
+    assert len(result["conversation"]) == 4
+    assert any(
+        item["event"] == "node" and item["data"].get("node") == "answer"
+        for item in events
+    )
 
 
 def test_send_message_still_works():

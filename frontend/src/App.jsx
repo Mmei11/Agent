@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import AuthScreen, { claimSession, fetchCurrentUser, logoutUser } from "./Auth.jsx";
+import HistoryDrawer from "./HistoryDrawer.jsx";
 
 // 预设案例只提供快捷输入文字；实际追问、风险判断和结果都由后端决定。
 const CASES = [
@@ -30,6 +32,7 @@ const NODE_LABELS = {
   tool: "检索知识库",
   followup: "生成追问",
   output: "整理结果",
+  answer: "整理回答",
 };
 
 // 只对刚收到的回复做打字机效果；历史消息直接显示，避免刷新页面时整屏重播。
@@ -196,23 +199,19 @@ async function streamMessage(sessionId, message, onNode) {
   return result;
 }
 
-// 重开时尽量清理旧会话；网络故障不阻止用户尝试开启新会话。
-async function discardSession(id) {
-  if (!id) return;
-  try {
-    await fetch("/sessions/" + encodeURIComponent(id), { method: "DELETE" });
-  } catch {
-    /* 断网时仍可尝试新建会话 */
-  }
-}
-
 export default function App() {
+  // undefined = 正在确认登录态；null = 未登录；对象 = 已登录用户。
+  const [user, setUser] = useState(undefined);
   // React state 会触发界面更新：会话 ID、消息、后端状态和输入框内容分别保存。
   const [sessionId, setSessionId] = useState(loadSession);
   const [messages, setMessages] = useState([]);
   const [state, setState] = useState(null);
   const [input, setInput] = useState("");
   const [activeCase, setActiveCase] = useState(null);
+  // 场景卡点选后把案例作为输入框占位提示，用户直接回车即可发送。
+  const [prefillCase, setPrefillCase] = useState(null);
+  const [prefillMessage, setPrefillMessage] = useState("");
+  const [historyOpen, setHistoryOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [restoring, setRestoring] = useState(Boolean(sessionId));
   const [error, setError] = useState("");
@@ -225,6 +224,9 @@ export default function App() {
   // ref 修改后不会触发渲染：busy 立即拦住重复点击，chatEnd 用于滚动到底部。
   const busy = useRef(false);
   const chatEnd = useRef(null);
+  const composerRef = useRef(null);
+  // 标记下一次发送要开启独立会话（场景卡预填时置位）。
+  const freshNext = useRef(false);
 
   // 只滚聊天区，不滚页面；scrollIntoView 会把输入框顶出视口。
   const scrollChat = useCallback((behavior = "smooth") => {
@@ -233,9 +235,32 @@ export default function App() {
     container.scrollTo({ top: container.scrollHeight, behavior });
   }, []);
 
+  // 先确认登录态；Cookie 无效时后端返回 401，前端展示登录页。
+  useEffect(() => {
+    let cancelled = false;
+    fetchCurrentUser()
+      .then((data) => {
+        if (!cancelled) setUser(data);
+      })
+      .catch(() => {
+        if (!cancelled) setUser(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // 登录后把本机上的游客会话归到账号；失败不影响继续使用。
+  useEffect(() => {
+    if (!user || !sessionId) return;
+    claimSession(sessionId).catch(() => {});
+    // 只在登录状态变化时认领一次，之后由服务端记录归属。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user]);
+
   // 首次进入页面时，用缓存的 ID 从后端恢复完整会话。
   useEffect(() => {
-    if (!sessionId) return;
+    if (!user || !sessionId) return;
     let cancelled = false;
     requestJson("/sessions/" + encodeURIComponent(sessionId))
       .then((data) => {
@@ -264,14 +289,25 @@ export default function App() {
       // 组件卸载后忽略尚未返回的请求，避免旧响应覆盖当前页面。
       cancelled = true;
     };
-    // 仅在页面加载时恢复，之后使用每次请求的完整响应。
+    // 仅在登录后恢复一次；之后使用每次请求的完整响应。
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [user]);
 
   // 新消息、选项或“正在整理信息”出现时，只滚动聊天区本身。
   useEffect(() => {
     scrollChat("auto");
   }, [messages, loading, state?.suggested_replies?.length, scrollChat]);
+
+  // 所有 Hook 都已声明完毕，可以按登录态切换整页内容。
+  if (user === undefined) {
+    return (
+      <div className="auth-splash" role="status">
+        <span className="brand-mark">✳</span>
+        <span>正在确认登录状态…</span>
+      </div>
+    );
+  }
+  if (!user) return <AuthScreen onAuthed={setUser} />;
 
   // 下列值都从后端状态推导，供页面展示，不参与后端问诊决策。
   const result = state?.final_result || {};
@@ -290,20 +326,47 @@ export default function App() {
         ? "等待补充"
         : "准备开始";
 
-  // raw 是待发送文字；fresh 表示强制新建会话；caseName 用于高亮选中的案例。
-  async function handleSend(raw = input, fresh = false, caseName = null) {
-    const message = raw.trim();
+  // 点选场景：切到新的空对话视图，旧会话保留在历史里；案例只预填，不自动发送。
+  function handlePickCase(item) {
+    if (loading || restoring) return;
+    freshNext.current = true;
+    setActiveCase(item.title);
+    setPrefillCase(item.title);
+    setPrefillMessage(item.message);
+    setInput("");
+    setError("");
+    clearSession();
+    setSessionId(null);
+    setState(null);
+    setMessages([]);
+    setCurrentNode("");
+    setAnimatedIndex(-1);
+    setFeedbackStatus("");
+    requestAnimationFrame(() => {
+      composerRef.current?.focus({ preventScroll: true });
+      composerRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
+  }
+
+  // raw 是待发送文字；场景卡预填后由 freshNext 决定是否开启新会话。
+  async function handleSend(raw = input) {
+    // 输入框为空时回退到场景卡占位提示里的案例：回车就能直接发送。
+    const message = raw.trim() || prefillMessage || "";
     // restoring 时还没确定旧会话状态；busy 在 React 重新渲染前就能阻止重复发送。
     if (!message || busy.current || restoring) return;
     busy.current = true;
     setLoading(true);
     setError("");
     setInput("");
+    setPrefillCase(null);
+    setPrefillMessage("");
     setCurrentNode("");
     setAnimatedIndex(-1);
     setFeedbackStatus("");
-    // 旧会话已有最终结果时，新输入自动成为下一轮独立会话的首条消息。
-    const startNew = fresh || hasResult || !sessionId;
+    const fromScenario = freshNext.current;
+    freshNext.current = false;
+    // 已有结果时继续发送，后端会回答追问；只有换场景或没有会话才新建。
+    const startNew = fromScenario || !sessionId;
     const previousMessages = messages;
     const previousState = state;
     const previousSessionId = sessionId;
@@ -311,7 +374,7 @@ export default function App() {
     if (startNew) {
       setMessages([{ role: "user", text: message }]);
       setState(null);
-      setActiveCase(caseName);
+      if (!fromScenario) setActiveCase(null);
     } else {
       setMessages((items) => [...items, { role: "user", text: message }]);
     }
@@ -326,7 +389,6 @@ export default function App() {
       let data;
       if (startNew) {
         // 选择预设案例或重新开始后，不能把旧会话的风险状态带到新会话。
-        await discardSession(sessionId);
         activeId = (await createEmptySession()).session_id;
         setSessionId(activeId);
         saveSession(activeId);
@@ -384,18 +446,80 @@ export default function App() {
     }
   }
 
-  // 清空当前前端状态与本地缓存，并请求后端删除对应会话。
+  // 只清空当前前端视图与本地缓存；后端会话保留，历史里还能找回。
   function handleReset() {
     if (busy.current || restoring) return;
-    discardSession(sessionId);
     clearSession();
     setSessionId(null);
     setState(null);
     setMessages([]);
     setInput("");
     setActiveCase(null);
+    setPrefillCase(null);
+    setPrefillMessage("");
+    freshNext.current = false;
     setError("");
     setFeedbackStatus("");
+  }
+
+  // 从历史列表打开会话：只恢复读取，不新建。
+  async function openHistorySession(id) {
+    if (busy.current || loading || restoring) return;
+    setRestoring(true);
+    setError("");
+    try {
+      const data = await requestJson("/sessions/" + encodeURIComponent(id));
+      setSessionId(id);
+      saveSession(id);
+      setState(data);
+      setMessages(data.conversation?.length ? data.conversation : []);
+      setAnimatedIndex(-1);
+      setActiveCase(null);
+      setPrefillCase(null);
+      setPrefillMessage("");
+      freshNext.current = false;
+      setFeedbackStatus("");
+      setHistoryOpen(false);
+      requestAnimationFrame(() => scrollChat("auto"));
+    } catch {
+      setError("会话加载失败，请稍后重试。");
+    } finally {
+      setRestoring(false);
+    }
+  }
+
+  // 删除的是当前会话时，本地也要立刻清空，避免还显示已删除的内容。
+  function handleHistoryDeleted(id) {
+    if (id !== sessionId) return;
+    clearSession();
+    setSessionId(null);
+    setState(null);
+    setMessages([]);
+    setInput("");
+    setActiveCase(null);
+    setPrefillCase(null);
+    setPrefillMessage("");
+    freshNext.current = false;
+    setFeedbackStatus("");
+  }
+
+  // 退出登录：吊销令牌并清掉本地视图；历史记录留在账号里，下次登录还能看到。
+  async function handleLogout() {
+    if (busy.current) return;
+    await logoutUser();
+    clearSession();
+    setSessionId(null);
+    setState(null);
+    setMessages([]);
+    setInput("");
+    setActiveCase(null);
+    setPrefillCase(null);
+    setPrefillMessage("");
+    freshNext.current = false;
+    setError("");
+    setFeedbackStatus("");
+    setHistoryOpen(false);
+    setUser(null);
   }
 
   // 提交本轮反馈；同一会话同一轮重复提交由后端覆盖。
@@ -424,7 +548,27 @@ export default function App() {
             Consult<span className="brand-light">/Lab</span>
           </span>
         </div>
-        <span className="topbar-meta">DAY 15 · INTERACTIVE DEMO</span>
+        <div className="topbar-account">
+          <span className="topbar-meta">DAY 15 · INTERACTIVE DEMO</span>
+          <button
+            className="text-button"
+            onClick={() => setHistoryOpen(true)}
+            disabled={loading || restoring}
+          >
+            历史
+          </button>
+          <div className="user-chip">
+            <span className="user-avatar" aria-hidden="true">
+              {user.display_name.trim().charAt(0).toUpperCase() || "U"}
+            </span>
+            <span className="user-name" title={user.email}>
+              {user.display_name}
+            </span>
+          </div>
+          <button className="text-button" onClick={handleLogout}>
+            退出
+          </button>
+        </div>
       </header>
       <main className="page-content">
         <section className="intro" aria-labelledby="page-title">
@@ -455,14 +599,14 @@ export default function App() {
             <span className="section-caption">每次选择都会开启独立会话</span>
           </div>
           <div className="scenario-grid">
-            {/* fresh=true：每次点击预设案例都开启独立会话。 */}
+            {/* 点选场景只预填输入框，发送时机交给用户。 */}
             {CASES.map((item) => (
               <button
                 key={item.id}
                 className={
                   "scenario-card" + (activeCase === item.title ? " selected" : "")
                 }
-                onClick={() => handleSend(item.message, true, item.title)}
+                onClick={() => handlePickCase(item)}
                 disabled={loading || restoring}
               >
                 <span className="scenario-number">{item.id}</span>
@@ -536,13 +680,14 @@ export default function App() {
                       <div className="message-label">
                         {item.role === "user" ? "模拟用户" : "问诊 Agent"}
                       </div>
-                      {/* 风险样式只标记本轮最后一条 Agent 回复。 */}
+                      {/* 只有真正的风险结果消息才用风险样式，后续追问不再套用。 */}
                       <div
                         className={
                           "message-bubble" +
                           (isRisk &&
-                          index === messages.length - 1 &&
-                          item.role === "agent"
+                          result.risk_message &&
+                          item.role === "agent" &&
+                          item.text.includes(result.risk_message)
                             ? " risk-bubble"
                             : "")
                         }
@@ -587,6 +732,13 @@ export default function App() {
               <div ref={chatEnd} />
             </div>
             <div className="composer-wrap">
+              {/* 预填提示：告诉用户案例已经放进输入框，发送与否由自己决定。 */}
+              {prefillCase && !input.trim() && !loading && (
+                <div className="case-prefill-note">
+                  <span aria-hidden="true">✎</span>
+                  已选择「{prefillCase}」案例，直接发送即可，或输入自己的描述。
+                </div>
+              )}
               {/* 错误在输入框上方提示；会话结束后说明下一次发送会自动重开。 */}
               {error && (
                 <div className="request-error" role="alert">
@@ -595,11 +747,12 @@ export default function App() {
               )}
               {hasResult && (
                 <div className="new-session-note">
-                  本轮已结束。继续输入将自动开启新的模拟会话。
+                  本轮已结束，可以继续追问；输入药品名称可查 OTC 说明书。
                 </div>
               )}
               <div className="composer">
                 <textarea
+                  ref={composerRef}
                   value={input}
                   onChange={(event) => setInput(event.target.value)}
                   onKeyDown={(event) => {
@@ -613,7 +766,7 @@ export default function App() {
                       handleSend();
                     }
                   }}
-                  placeholder="描述一个虚构病例，或补充上一轮回答…"
+                  placeholder={prefillMessage || "描述一个虚构病例，或补充上一轮回答…"}
                   aria-label="输入模拟病例描述"
                   rows={2}
                   disabled={loading || restoring}
@@ -621,7 +774,7 @@ export default function App() {
                 <button
                   className="send-button"
                   onClick={() => handleSend()}
-                  disabled={!input.trim() || loading || restoring}
+                  disabled={(!input.trim() && !prefillMessage) || loading || restoring}
                   aria-label="发送消息"
                 >
                   发送 <span aria-hidden="true">↗</span>
@@ -738,8 +891,16 @@ export default function App() {
         </section>
         <footer>
           CONSULT / LAB <span>·</span> 虚构病例交互演示
+          <span className="build-tag">BUILD {__BUILD_ID__}</span>
         </footer>
       </main>
+      <HistoryDrawer
+        open={historyOpen}
+        currentSessionId={sessionId}
+        onClose={() => setHistoryOpen(false)}
+        onOpen={openHistorySession}
+        onDeleted={handleHistoryDeleted}
+      />
     </div>
   );
 }

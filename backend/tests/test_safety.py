@@ -54,6 +54,34 @@ def test_safe_message():
     assert result["level"] == "safe"
 
 
+def test_cardiopulmonary_variants_route_to_risk():
+    """心肺急症的常见口语表达也要命中风险。"""
+    for message in [
+        "我心脏现在爆痛",
+        "我有点呼吸停止的症状",
+        "胸口有一阵剧痛",
+        "不能呼吸",
+        "无法呼吸",
+        "呼吸很费力",
+        "心脏痛",
+    ]:
+        result = screen(message)
+        assert result["level"] == "risk", message
+        assert result["rule"] == "R001"
+
+
+def test_cardiopulmonary_negation_and_unrelated_stay_safe():
+    """否定或不相关的“爆痛”不能误报。"""
+    for message in [
+        "心脏没有爆痛",
+        "呼吸没有停止",
+        "没有胸痛",
+        "牙爆痛",
+    ]:
+        result = screen(message)
+        assert result["level"] == "safe", message
+
+
 def test_final_check_blocks_risk_word():
     """最终输出包含风险词：拦截。"""
     result = final_check("根据情况，可能是呼吸困难")

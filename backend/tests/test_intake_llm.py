@@ -63,6 +63,33 @@ def test_drops_hallucinated_fact():
     assert to_field_dict(keep_supported(facts, text)) == {}
 
 
+def test_value_must_appear_in_text():
+    """value 不在原文里，即使 evidence 存在也不能算事实。"""
+    text = "我吃了布洛芬还是头疼"
+    facts = make_facts(aggravating=[fact("缓解", evidence="吃了布洛芬")])
+
+    assert to_field_dict(keep_supported(facts, text)) == {}
+
+
+def test_medication_action_is_not_a_relief_factor():
+    """“吃了布洛芬”不是加重/缓解因素，用户还说“还是头疼”。"""
+    text = "我吃了布洛芬还是头疼"
+    facts = make_facts(aggravating=[fact("吃了布洛芬")])
+
+    assert to_field_dict(keep_supported(facts, text)) == {}
+
+
+def test_real_factor_is_kept():
+    text = "活动后加重，休息后缓解"
+    facts = make_facts(
+        aggravating=[fact("活动后加重"), fact("休息后缓解")]
+    )
+
+    result = to_field_dict(keep_supported(facts, text))
+
+    assert result == {"加重缓解因素": ["活动后加重", "休息后缓解"]}
+
+
 def test_keeps_multiple_values():
     """IN06：同一字段有多个表达时都要保留。"""
     text = "最近一周总觉得累，没什么力气"

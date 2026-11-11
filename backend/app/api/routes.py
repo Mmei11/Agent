@@ -15,7 +15,13 @@ from pydantic import BaseModel, Field  # 定义请求和响应的数据结构
 from sse_starlette.sse import EventSourceResponse  # Phase 6：服务端发送事件流
 
 from backend.app.agent.graph import build_graph  # 组装 LangGraph 状态图
+from backend.app.accounts import store as account_store  # Phase 7：会话归属
 from backend.app.api import inflight  # Phase 6 L3.3：会话在途与流计数
+from backend.app.api.accounts import (  # Phase 7：账号
+    current_user,
+    optional_current_user,
+)
+from backend.app.api.accounts import router as accounts_router  # Phase 7：账号路由
 from backend.app.api.auth import CallerIdentity, caller_key, require_api_key  # 认证
 from backend.app.api.limits import (  # Phase 6 L3.3：体积与消息长度边界
     BodySizeLimitMiddleware,
@@ -35,7 +41,15 @@ from backend.app.storage.saver import DEFAULT_DB_PATH, create_saver  # SQLite sa
 logger = logging.getLogger(__name__)
 
 # 只把这些节点的进度推给前端；图内部的 checkpoint 等事件不对外。
-STREAM_NODES = {"intake", "risk_check", "decision", "followup", "tool", "output"}
+STREAM_NODES = {
+    "intake",
+    "risk_check",
+    "decision",
+    "followup",
+    "tool",
+    "output",
+    "answer",
+}
 
 # 客户端断开后，后台线程仍要把本轮跑完；这里持有任务引用，避免被垃圾回收。
 _background_tasks: set[asyncio.Task] = set()
@@ -50,6 +64,9 @@ app = FastAPI(
 app.add_middleware(BodySizeLimitMiddleware)
 # 请求级 trace 包在最外层，认证/限流的 span 才有地方落。
 app.add_middleware(RequestTraceMiddleware)
+
+# 账号接口（/auth/*）不走 API Key：浏览器拿不到 key，靠 HttpOnly Cookie。
+app.include_router(accounts_router)
 
 
 def _parent_trace_attributes() -> dict:
@@ -70,6 +87,14 @@ def _bind_request_trace_session(session_id: str) -> None:
     scope.session_id = session_id
     for record in scope.stack:
         record.session_id = session_id
+
+
+def _title_from_values(values: dict) -> str:
+    """历史列表标题取第一条用户消息；空会话返回空串。"""
+    for item in (values or {}).get("conversation") or []:
+        if item.get("role") == "user" and item.get("text"):
+            return item["text"]
+    return ""
 
 # 图是同步的（SqliteSaver 没有异步接口），所以给图单独一个线程池，
 # 不跟 FastAPI 的 anyio 线程池抢名额。线程数就是"同时在跑的图"的上限。
@@ -181,6 +206,21 @@ class FeedbackRequest(BaseModel):
     reason: str = Field(default="", max_length=200)
 
 
+class ClaimSessionRequest(BaseModel):
+    """把本机上的游客会话绑定到当前账号。"""
+
+    session_id: str
+
+
+class SessionSummary(BaseModel):
+    """历史列表的一行；对话内容不在这里，点开时再 GET 完整会话。"""
+
+    session_id: str
+    title: str = ""
+    created_at: str
+    last_active_at: str
+
+
 class SessionResponse(BaseModel):
     """会话状态响应。所有接口的返回都用这个格式。
 
@@ -204,19 +244,30 @@ class SessionResponse(BaseModel):
 # --- 五个接口 ---
 
 @app.post("/sessions", response_model=SessionResponse, dependencies=[Depends(rate_limit)])
-async def create_session(req: CreateSessionRequest):
+async def create_session(
+    req: CreateSessionRequest,
+    user: dict | None = Depends(optional_current_user),
+):
     """创建新会话。如果传了 initial_message，立即处理。
 
     流程：生成 session_id → 如果有消息就调图处理 → 返回状态。
+    登录状态下创建会自动记到账号的会话历史里。
     """
     session_id = str(uuid.uuid4())  # 生成随机会话 ID，如 "a3f2b1c4-..."
     _bind_request_trace_session(session_id)
     check_message_length(req.initial_message)
-    values = await _run_sync(_create_session_sync, session_id, req.initial_message)
+    values = await _run_sync(
+        _create_session_sync,
+        session_id,
+        req.initial_message,
+        user["id"] if user else None,
+    )
     return _to_response(session_id, values)
 
 
-def _create_session_sync(session_id: str, initial_message: str) -> dict:
+def _create_session_sync(
+    session_id: str, initial_message: str, user_id: str | None = None
+) -> dict:
     """在工作线程里建会话；同一线程内的 saver 负责写入。"""
     graph = get_app()
     config = {"configurable": {"thread_id": session_id}}
@@ -235,7 +286,9 @@ def _create_session_sync(session_id: str, initial_message: str) -> dict:
         # 空会话也落盘，确保返回的 ID 随后能 GET 和发送消息。
         graph.update_state(config, {"session_id": session_id})
 
-    return _read_values(graph, config)
+    values = _read_values(graph, config)
+    account_store.record_session(session_id, user_id, _title_from_values(values))
+    return values
 
 
 @app.post(
@@ -267,10 +320,13 @@ def _run_turn_sync(session_id: str, message: str) -> dict:
     with start_trace(
         session_id, turn_id=turn_id, root_attributes=_parent_trace_attributes()
     ):
-        return graph.invoke(  # checkpointer 自动恢复之前的 state
+        values = graph.invoke(  # checkpointer 自动恢复之前的 state
             {"latest_user_message": message, "session_id": session_id},
             config=config,
         )
+
+    account_store.touch_session_record(session_id, _title_from_values(values))
+    return values
 
 
 @app.post("/sessions/{session_id}/stream", dependencies=[Depends(rate_limit)])
@@ -400,6 +456,9 @@ async def _stream_turn(
                         )
 
                 state = graph.get_state(config)
+                account_store.touch_session_record(
+                    session_id, _title_from_values(state.values)
+                )
                 push("result", _to_response(session_id, state.values).model_dump())
             except Exception:
                 # 堆栈只进服务端日志，前端拿到可重试的稳定提示。
@@ -437,10 +496,9 @@ def _prepare_turn_sync(session_id: str):
     snapshot = graph.get_state(config)
     if snapshot is None or not snapshot.values:
         raise HTTPException(status_code=404, detail="会话不存在")
-    if snapshot.values.get("final_result"):
-        raise HTTPException(status_code=409, detail="本轮问诊已结束，请开启新会话")
 
     # turn_id 在进入图之前算好：intake 节点会把 state.turn_id 加一。
+    # 已有 final_result 也允许继续发送：图上会走 answer 节点回答追问。
     turn_id = int((snapshot.values or {}).get("turn_id", 0)) + 1
     return config, turn_id
 
@@ -477,6 +535,8 @@ async def delete_session(session_id: str):
     # 有轮次在跑时不允许删除，避免把正在写的 checkpoint 抽走。
     with inflight.session_guard(session_id):
         await _run_sync(_delete_session_sync, session_id)
+    # 显式删除才清历史行；重置/退出登录不再走这个接口。
+    account_store.forget_session(session_id)
     return {"session_id": session_id, "status": "deleted"}
 
 
@@ -544,3 +604,44 @@ def _to_response(session_id: str, values: dict) -> SessionResponse:
         rendered_text=values.get("rendered_text", ""),
         conversation=values.get("conversation", []),
     )
+
+
+# --- 账号的会话历史 ---
+
+
+@app.get("/me/sessions", response_model=list[SessionSummary])
+async def list_my_sessions(user: dict = Depends(current_user), limit: int = 50):
+    """当前账号的会话历史，按最近活跃排序。"""
+    limit = max(1, min(limit, 100))
+    return await _run_sync(account_store.list_sessions, user["id"], limit)
+
+
+@app.post("/me/sessions/claim")
+async def claim_my_session(
+    req: ClaimSessionRequest, user: dict = Depends(current_user)
+):
+    """登录后把本机游客会话归到账号；只能认领没有归属的会话。"""
+    result = await _run_sync(
+        account_store.claim_session, req.session_id, user["id"]
+    )
+    if result == "missing":
+        raise HTTPException(status_code=404, detail="会话不存在")
+    if result == "conflict":
+        raise HTTPException(status_code=409, detail="该会话已属于其他账号")
+    return {"session_id": req.session_id, "claimed": result == "claimed"}
+
+
+@app.delete("/me/sessions/{session_id}")
+async def delete_my_session(
+    session_id: str, user: dict = Depends(current_user)
+):
+    """删除自己的会话：先确认归属，再清 checkpoint 和历史行。"""
+    if not await _run_sync(
+        account_store.user_owns_session, session_id, user["id"]
+    ):
+        raise HTTPException(status_code=404, detail="会话不存在")
+
+    with inflight.session_guard(session_id):
+        await _run_sync(_delete_session_sync, session_id)
+    account_store.forget_session(session_id)
+    return {"session_id": session_id, "status": "deleted"}

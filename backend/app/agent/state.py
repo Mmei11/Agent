@@ -64,6 +64,10 @@ class ConsultationState(BaseModel):
     # next_action：决策节点选出的动作
     next_action: str = ""
 
+    # turn_kind：consultation = 正常收集；followup = 已有结果后的继续提问。
+    # intake 根据上一轮是否已有 final_result 判断，决定后续走回答节点。
+    turn_kind: str = ""
+
     # --- 输出 ---
     # final_result：结构化结果字典，给测试和前端解析用
     final_result: dict = {}

@@ -56,6 +56,11 @@ services:
       DASHSCOPE_API_KEY: ${DASHSCOPE_API_KEY:-}
       DASHSCOPE_MODEL: ${DASHSCOPE_MODEL:-qwen-plus}
       DASHSCOPE_BASE_URL: ${DASHSCOPE_BASE_URL:-https://dashscope.aliyuncs.com/compatible-mode/v1}
+      # 宿主机代理用 fake-ip 时，容器会解析到 198.18.x.x 并握手失败。
+      # 在 .env 里配置 HTTP(S)_PROXY_DOCKER 后，模型调用走宿主机代理。
+      HTTP_PROXY: ${HTTP_PROXY_DOCKER:-}
+      HTTPS_PROXY: ${HTTPS_PROXY_DOCKER:-}
+      NO_PROXY: ${NO_PROXY_DOCKER:-localhost,127.0.0.1,knowledge-db,host.docker.internal}
       # 容器内按服务名解析；本机直接跑 uvicorn 时用默认的 127.0.0.1:15433。
       KNOWLEDGE_DB_URL: postgresql://postgres:postgres@knowledge-db:5432/knowledge
     volumes:
