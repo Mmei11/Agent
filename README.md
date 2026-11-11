@@ -50,10 +50,10 @@ DASHSCOPE_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
 
 | 服务 | 地址 |
 | --- | --- |
-| 前端演示界面 | <http://localhost:8080> |
-| 后端 API（经 Nginx 转发） | <http://localhost:8080/sessions> |
-| Swagger API 文档 | <http://localhost:8080/docs> |
-| OpenAPI JSON | <http://localhost:8080/openapi.json> |
+| 前端演示界面 | <http://localhost:8081> |
+| 后端 API（经 Nginx 转发） | <http://localhost:8081/sessions> |
+| Swagger API 文档 | <http://localhost:8081/docs> |
+| OpenAPI JSON | <http://localhost:8081/openapi.json> |
 
 前端端口可用 `FRONTEND_PORT` 覆盖。例如：
 
@@ -101,7 +101,7 @@ docker compose down -v    # 同时删除数据卷和会话数据
 
 | 栈 | Compose 文件 | Compose 项目名 | 包含服务 | 访问端口 |
 | --- | --- | --- | --- | --- |
-| 主应用 | `docker-compose.yml` | `agent`（默认取目录名） | backend、frontend | 8080 |
+| 主应用 | `docker-compose.yml` | `agent`（默认取目录名） | backend、frontend | 8081 |
 | 观测栈 | `docker-compose.observability.yml` | `consultation-observability`（文件内固定） | langfuse-web、langfuse-worker、Postgres、ClickHouse、Redis、MinIO | 3000 等 |
 
 以下命令都在项目根目录运行。Docker 面板里会分别显示为 `agent` 和 `consultation-observability` 两组。**建议所有命令都带 `-f` 指定文件**，这样在项目根目录下不会误操作另一套：
@@ -227,7 +227,7 @@ uv run python -m eval.adversarial_eval
 ### 创建会话并发送第一轮
 
 ```sh
-curl -s http://localhost:8080/sessions \
+curl -s http://localhost:8081/sessions \
   -H 'Content-Type: application/json' \
   -d '{"initial_message":"虚构人物头部不适"}'
 ```
@@ -239,7 +239,7 @@ curl -s http://localhost:8080/sessions \
 把创建接口返回的 ID 替换到 URL：
 
 ```sh
-curl -s http://localhost:8080/sessions/SESSION_ID/messages \
+curl -s http://localhost:8081/sessions/SESSION_ID/messages \
   -H 'Content-Type: application/json' \
   -d '{"message":"虚构人物表示，前两天开始，主要在前额"}'
 ```
@@ -247,8 +247,8 @@ curl -s http://localhost:8080/sessions/SESSION_ID/messages \
 ### 查询或删除会话
 
 ```sh
-curl -s http://localhost:8080/sessions/SESSION_ID
-curl -X DELETE http://localhost:8080/sessions/SESSION_ID
+curl -s http://localhost:8081/sessions/SESSION_ID
+curl -X DELETE http://localhost:8081/sessions/SESSION_ID
 ```
 
 | 方法 | 路径 | 用途 |
@@ -258,7 +258,7 @@ curl -X DELETE http://localhost:8080/sessions/SESSION_ID
 | `GET` | `/sessions/{session_id}` | 读取当前持久化状态 |
 | `DELETE` | `/sessions/{session_id}` | 删除该会话的 SQLite 检查点 |
 
-Swagger 文档提供交互式请求界面：<http://localhost:8080/docs>（本机开发时为 <http://localhost:8000/docs>）。向已结束的会话继续发消息会返回 `409`；不存在的会话返回 `404`；空白的后续消息返回 `400`。
+Swagger 文档提供交互式请求界面：<http://localhost:8081/docs>（本机开发时为 <http://localhost:8000/docs>）。向已结束的会话继续发消息会返回 `409`；不存在的会话返回 `404`；空白的后续消息返回 `400`。
 
 ## 自动化检查与评测
 
