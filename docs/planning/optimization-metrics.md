@@ -360,6 +360,38 @@ uv run python -m eval.context_retention --split holdout
 - `selection_accuracy`：期望工具与实际调用一致的比例
 - `dangerous_misuse`：调用了声明为禁止的工具的次数（目标 0）
 - `no_tool_rate`：本应调用工具但没调的比例
+- `blocked_by_intake`：期望 `department_route` 但停在追问、且仍有缺失字段的次数（说明是抽取没完成，不是工具选错）
+- `unreachable`：期望的是 `department_route` 之外的工具、但实际没调用
+
+**当前基线（2026-11-11，mock，dev 8 条有效 + 2 条 general 跳过）**
+
+| 组别 | 样本 | selection | outcome | 危险误调 | 不可达 | 被 intake 挡住 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 全部 | 8 | 0.625 | 1.000 | 0 | 3 | 0 |
+| department | 3 | 1.000 | 1.000 | 0 | 0 | 0 |
+| guideline | 3 | 0.000 | 1.000 | 0 | 3 | 0 |
+| risk | 2 | 1.000 | 1.000 | 0 | 0 | 0 |
+
+**怎么读**：
+
+- `guideline` 的 0 不是模型选错，而是图里根本没有第二个工具；`unreachable=3` 就是 Phase C 要修的结构缺口。
+- `risk` 期望工具为 null：红旗由规则层在 decision 之前短路，不应进入工具节点。
+- `general` 需要模型路由，mock 模式跳过；模型模式会补上这 2 条。
+- 模型模式下 `department` 可能受 intake 抽取完整度影响；用 `blocked_by_intake` 把“抽取没完成”和“工具选错”分开。
+
+**模型模式基线（2026-11-11，dev 10 条）**
+
+| 组别 | 样本 | selection | outcome | 危险误调 | 不可达 | 被 intake 挡住 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 全部 | 10 | 0.700 | 1.000 | 0 | 3 | 0 |
+| department | 3 | 1.000 | 1.000 | 0 | 0 | 0 |
+| general | 2 | 1.000 | 1.000 | 0 | 0 | 0 |
+| guideline | 3 | 0.000 | 1.000 | 0 | 3 | 0 |
+| risk | 2 | 1.000 | 1.000 | 0 | 0 | 0 |
+
+- 科室类 3/3、普通问题 2/2、风险类 2/2；危险误调 0。
+- 唯一的失败是 `guideline_retrieve` 3/3 不可达，全部由“图只会调 department_route”造成，不是模型选错。
+- 首轮模型基线曾出现科室类 1/3：两条停在追问，原因是样本用了“没有其他不适”这种否定式伴随表现，被模型抽取丢掉。改成阳性伴随症状（“伴有恶心/乏力”）后恢复到 3/3。这说明 `blocked_by_intake` 这一列有必要。
 
 参数正确性（`tool_args`）留到 Phase C 一起测；当前参数由代码拼接，不是模型生成，单独测没有意义。
 
@@ -380,7 +412,17 @@ uv run python -m eval.tool_selection --use-model
 
 **数据来源**：`TRACE_SINK=jsonl` 写出的 span，读取 `gen_ai.usage.input_tokens`，按 `prompt.name` 分组。现有 `run_eval` 只统计会话总量，无法回答“哪一步的 prompt 最大”。
 
-**基线**：Phase A 先建立测量链路；真实数值在模型模式下记录。mock 模式没有 LLM span，指标为 N/A。
+**基线（2026-11-11，E001 单案例，4 次模型调用）**
+
+| 节点 / prompt | 调用 | 输入 total | 输入 p95 | 延迟 p95(ms) |
+| --- | ---: | ---: | ---: | ---: |
+| `intake.extract` | 1 | 1215 | 1215 | 2456 |
+| `decision.choose` | 1 | 769 | 769 | 1827 |
+| `router.reply` | 1 | 484 | 484 | 625 |
+| `followup.replies` | 1 | 455 | 455 | 760 |
+| 全部 | 4 | 2923 | 1148.1 | 2361.6 |
+
+**注意**：这是单案例、单次运行的链路验证，p95 与 max 相同，不是统计意义上的分位数。真实分位数要多次会话汇总；它的用途是确认“每一步的 prompt 有多大”，不是给出稳定基线。
 
 **目标**：Phase B 后，每节点 p95 不超过该节点预算的 110%；单轮工具结果进入上下文前不超过 400 字。
 
@@ -396,7 +438,7 @@ TRACE_SINK=jsonl TRACE_PATH=logs/traces.jsonl uv run python -m eval.token_ledger
 
 **定义**：给定一条医疗开场描述，系统是否路由到正确的问诊技能（如头痛、儿童发热、皮疹）。
 
-**当前状态**：还没有技能层，指标 N/A。Phase A 只建立占位脚本与样本格式，Phase D 前填入每技能 10 条样本。
+**当前状态（2026-11-11）**：尚无技能层，指标 N/A。已建 6 条占位样本（`headache` / `pediatric_fever` 各 3 条），全部 `enabled=false`；Phase D 实现 `backend.app.skills.router.route` 后逐条启用。
 
 **目标（Phase D 后）**：≥ 0.90；路由置信度低于阈值时回退到默认技能。
 

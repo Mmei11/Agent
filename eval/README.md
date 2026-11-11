@@ -204,3 +204,46 @@ uv run python -m eval.context_retention --split holdout
 注意：模型模式下 `bypass > 0` 说明探针没走记忆路径，不能用来判断“记不住”。mock 模式跳过单路由，所以 `bypass` 恒为 0，但 `answer` 也恒为 0（兜底文案不读对话），两列都只用于验证测量链路。
 
 输出在 `eval/results/context-retention/`。`eval/results/` 已被忽略，不提交。
+
+## 工具选择（Phase A / M7）
+
+`tool_selection.py` 检查“该调哪个工具”。样本在 `eval/probes/tool_selection.jsonl`，分四类：科室方向、就医指引、风险短路、普通问题。
+
+```sh
+uv run python -m eval.tool_selection
+uv run python -m eval.tool_selection --use-model
+uv run python -m eval.tool_selection --case TS04,TS05
+```
+
+报告会区分三种失败：
+
+- `unreachable`：期望 `guideline_retrieve`，但图只会调 `department_route`；
+- `blocked_by_intake`：期望 `department_route`，但停在追问且仍有缺失字段；
+- `dangerous_misuse`：调用了声明为禁止的工具。
+
+参数正确性（`tool_args`）在 Phase C 之后再测，当前参数由代码拼接。
+
+## Token 账本（Phase A / M8）
+
+`token_ledger.py` 读 trace JSONL，按 `prompt.name` 统计每次模型调用的输入/输出 token 与延迟。它只读文件，不调用模型。
+
+```sh
+# 先生成一份带 LLM span 的 trace（会产生模型费用）
+TRACE_SINK=jsonl TRACE_PATH=/tmp/m8-traces.jsonl \
+    uv run python -m eval.run_eval --use-model --case E001
+
+# 再汇总
+uv run python -m eval.token_ledger --trace /tmp/m8-traces.jsonl
+```
+
+没有 trace 或没有 `gen_ai.usage.*` span 时输出 N/A，不报错。
+
+## 技能路由（Phase A / M9）
+
+`skill_routing.py` 是 Phase D 的占位：样本在 `eval/probes/skill_routing.jsonl`，默认全部 `enabled=false`。实现 `backend.app.skills.router.route(message)` 后逐条启用。
+
+```sh
+uv run python -m eval.skill_routing
+```
+
+当前输出 N/A，并说明原因；启用后报告准确率与逐条路由结果。

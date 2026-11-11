@@ -1,0 +1,6 @@
+{"id": "SR01", "split": "dev", "message": "头痛两天了，前额一阵一阵胀痛", "expected_skill": "headache", "enabled": false, "note": "Phase D 启用"}
+{"id": "SR02", "split": "dev", "message": "脑袋嗡嗡的，从前天傍晚开始", "expected_skill": "headache", "enabled": false, "note": "Phase D 启用"}
+{"id": "SR03", "split": "dev", "message": "头晕伴恶心，转头时更明显", "expected_skill": "headache", "enabled": false, "note": "Phase D 启用"}
+{"id": "SR04", "split": "dev", "message": "孩子三岁，发烧三十八度五，精神还可以", "expected_skill": "pediatric_fever", "enabled": false, "note": "Phase D 启用"}
+{"id": "SR05", "split": "dev", "message": "宝宝一岁半，昨晚开始发热，有点咳嗽", "expected_skill": "pediatric_fever", "enabled": false, "note": "Phase D 启用"}
+{"id": "SR06", "split": "dev", "message": "小孩烧到三十九度，手脚凉", "expected_skill": "pediatric_fever", "enabled": false, "note": "Phase D 启用"}

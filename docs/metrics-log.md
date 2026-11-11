@@ -348,3 +348,52 @@
 - 结论：`bypass` 8→0；事实类 3/3、近距对话 2/2 命中；远距对话 0/3，模型明确回答“这轮对话里没有记录到”，没有编造。路由修复已经把它和“记忆存储”问题分开，剩下的远距丢失进入 Phase B。
 - 测量口径修复：首次修复后运行的 `window/prompt` 被探针回答自身污染（CR03 的回答含“地铁”，把窗口点亮）。已改为“探针发送前的状态快照 + 探针用户消息”，并重跑干净的 8 条；上表是干净结果。
 - 单测：461 passed（新增探针前快照测试）。
+
+**2026-11-11 · M7 工具选择：建立标尺**
+
+- 新增 `eval/tool_selection.py` + `eval/probes/tool_selection.jsonl`（12 条，10 dev / 2 holdout）
+- 样本分四类：科室方向、就医指引、风险短路、普通问题
+- 判决新增 `blocked_by_intake`：期望 `department_route` 但停在追问且仍有缺失字段，说明是抽取没完成，不算工具选错
+- mock 基线（dev 8 有效，2 条 general 跳过）：
+
+| 组别 | n | selection | outcome | 危险误调 | 不可达 | 被 intake 挡住 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 全部 | 8 | 0.625 | 1.000 | 0 | 3 | 0 |
+| department | 3 | 1.000 | 1.000 | 0 | 0 | 0 |
+| guideline | 3 | 0.000 | 1.000 | 0 | 3 | 0 |
+| risk | 2 | 1.000 | 1.000 | 0 | 0 | 0 |
+
+- 结论：`guideline_retrieve` 3/3 不可达，是 Phase C 的结构缺口；科室与风险类当前都正确，危险误调为 0。
+- 模型基线（dev 10 条）：
+
+| 组别 | n | selection | outcome | 危险误调 | 不可达 | 被 intake 挡住 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 全部 | 10 | 0.700 | 1.000 | 0 | 3 | 0 |
+| department | 3 | 1.000 | 1.000 | 0 | 0 | 0 |
+| general | 2 | 1.000 | 1.000 | 0 | 0 | 0 |
+| guideline | 3 | 0.000 | 1.000 | 0 | 3 | 0 |
+| risk | 2 | 1.000 | 1.000 | 0 | 0 | 0 |
+
+- 首轮模型基线科室类只有 1/3：两条停在追问，原因是样本用了“没有其他不适”，被模型抽取丢掉。改成阳性伴随症状后恢复到 3/3；`blocked_by_intake` 这一列用来区分“抽取没完成”和“工具选错”。
+
+**2026-11-11 · M8 token 账本**
+
+- 新增 `eval/token_ledger.py`：读 trace JSONL，按 `prompt.name` 统计输入/输出 token 与延迟；只读文件，不调用模型
+- 用 E001 单案例生成真实 trace（4 次调用）：
+
+| 节点 / prompt | 调用 | 输入 total | 输入 p95 | 延迟 p95(ms) |
+| --- | ---: | ---: | ---: | ---: |
+| intake.extract | 1 | 1215 | 1215 | 2456 |
+| decision.choose | 1 | 769 | 769 | 1827 |
+| router.reply | 1 | 484 | 484 | 625 |
+| followup.replies | 1 | 455 | 455 | 760 |
+| 全部 | 4 | 2923 | 1148.1 | 2361.6 |
+
+- 结论：`intake.extract` 是输入 token 最大头（1215，占 41.6%），与 Phase 1 的成本观察一致。
+- 注意：单案例单次运行，p95 与 max 相同，只验证测量链路；真实分位数要多次会话汇总。
+
+**2026-11-11 · M9 技能路由占位**
+
+- 新增 `eval/skill_routing.py` + `eval/probes/skill_routing.jsonl`（6 条：`headache` / `pediatric_fever` 各 3 条）
+- 全部 `enabled=false`，当前输出 N/A；Phase D 实现 `backend.app.skills.router.route` 后逐条启用
+- 单测：472 passed（新增 M7 6 条、M8 3 条、M9 3 条判定逻辑测试）
