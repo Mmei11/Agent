@@ -199,6 +199,8 @@ uv run python -m eval.context_retention --split holdout
 
 每条样本测五层：`state`（结构化字段）、`window`（最近 6 条对话）、`prompt`（answer 节点实际上下文）、`answer`（最终回答）、`bypass`（被单路由直接回答、没走 answer 节点）。
 
+`prompt` 包含 Phase B 的 `session_memory`。远距样本可能出现 `window=0` 但 `prompt=1`，说明信息来自记忆卡，而不是窗口变大。
+
 回答里出现“没有提到/无法查看/不记得”等否认回忆的表述时，即使澄清问句里碰巧出现期望值，也判为失败。
 
 注意：模型模式下 `bypass > 0` 说明探针没走记忆路径，不能用来判断“记不住”。mock 模式跳过单路由，所以 `bypass` 恒为 0，但 `answer` 也恒为 0（兜底文案不读对话），两列都只用于验证测量链路。

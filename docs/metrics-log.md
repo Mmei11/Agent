@@ -397,3 +397,40 @@
 - 新增 `eval/skill_routing.py` + `eval/probes/skill_routing.jsonl`（6 条：`headache` / `pediatric_fever` 各 3 条）
 - 全部 `enabled=false`，当前输出 N/A；Phase D 实现 `backend.app.skills.router.route` 后逐条启用
 - 单测：472 passed（新增 M7 6 条、M8 3 条、M9 3 条判定逻辑测试）
+
+**2026-11-11 · Phase B 第 1 课：会话记忆卡与上下文装配**
+
+- 新增 `backend/app/memory/session_memory.py`：只存“没进结构化字段、但值得跨轮记住”的第一人称细节；事实仍以 `collected_facts` 为准，结论仍以 `final_result` 为准
+- 新增 `backend/app/context/budget.py`：回答节点字符预算（最近对话 6 条 / 1200 字，记忆卡 8 条 / 600 字）
+- 新增 `backend/app/context/assembler.py`：`assemble_answer_context` 统一装配 question / facts / final_result / recent_conversation / session_memory
+- `ConsultationState` 增加 `session_memory`；intake 每轮更新；answer 的 `build_context` 改用装配器
+- answer prompt 升到 v5：记忆类问题先看 `session_memory.details`，再看最近对话；找不到才说“没有记录到”
+- 记忆筛选规则：有结构化事实、不是第一人称、或只是记忆指代追问，都不存；最多 10 条、单条 120 字
+- 稳健性修正：模型可能把“下周”抽成持续时间；只要消息里有明确的个人细节线索（如“出差”“下周”），即使抽到字段也仍保留细节
+- mock M6 复测：`conversation/far` 的 `prompt` 从 0 升到 1.0，`window` 仍为 0——信息确实从记忆卡进入，不是窗口变大
+- 单测：487 passed（新增记忆卡 10 条、装配 3 条、图端到端 1 条）
+- 模型模式复测（dev 8 条）：
+
+| 组别 | n | state | window | prompt | answer | bypass | 否认回忆 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 全部 | 8 | 0.375 | 0.750 | 1.000 | 1.000 | 0 | 0 |
+| fact / far | 2 | 1.000 | 1.000 | 1.000 | 1.000 | 0 | 0 |
+| conversation / near | 2 | 0.000 | 1.000 | 1.000 | 1.000 | 0 | 0 |
+| conversation / far | 3 | 0.000 | 0.333 | 1.000 | 1.000 | 0 | 0 |
+
+- 结论：`conversation/far` 的 `answer` 0.000 → 1.000、`prompt` 0 → 1.000，`window` 仍只有 0.333；至少两条远距细节在最近窗口之外，仍被正确回答。`否认回忆=0`，没有编造。
+- Phase B 四项目标全部达成：对话类 `bypass=0`、`否认回忆=0`、context `answer=1.000`、far `prompt=1.000`。
+
+**2026-11-11 · Phase B 第 2 课：decision 接入参考上下文**
+
+- `decision_llm.build_context` 增加 `session_memory` 与 `recent_conversation`（4 条 / 300 字；4 条 / 800 字）
+- decision prompt 升到 v2：参考上下文只用于理解指代，不当作新事实；用户已说过的信息不重复追问
+- 尝试过 intake 参考上下文（JSON 包装）：prompt v3 F1 **0.8734**，prompt v4 修正字段归属后 **0.9057**，均低于基线 **0.9325**；主要错误在 `associated` / `severity` 之间来回漂移
+- 决定回退 intake 到 v2 prompt：证据闸门本来就阻止参考上下文贡献事实，intake 吃上下文只增加噪声；多轮指代交给 decision / answer
+- 顺带修复 `eval.run_eval` 未关闭限流导致 33 案例回归出现 429 的问题：评测是离线测量，不应被进程内限流打断；限流本身仍由 `test_ratelimit.py` 覆盖
+- 单测：489 passed；33/33 mock 回归通过
+- M1 回退后复测：v2 prompt（与 10 月基线完全同一份代码）两次结果为 **0.8750 / 0.8790**（P 0.8642 / 0.8846，R 0.8861 / 0.8734），当前模型下均值约 **0.877**；keyword 抽取仍是 0.4865，说明评测器与标注没变。
+- **结论：0.9325 是 2026-10-26 的历史基线，当前 qwen-plus 行为已漂移，不能跨日期直接比较。** “参考上下文导致退化”的因果判断不成立——同一份 v2 代码今天也只有 0.877。
+- 基于当前模型的新基线：v2 ≈ 0.877。
+- v5（纯文本 + 字段归属 guidance）第一次复测 **0.8734**，`伴随表现` 仍 TP=1 / FP=7，未高于 v2；v4 的 0.9057 没有复现，按单次波动处理。**已回退到 v2**，`intake_llm.py` 与提交版无 diff。
+- 最终：intake 保持解析器边界；decision 保留记忆接入；M1 后续以 **0.877** 作为当前模型基线。

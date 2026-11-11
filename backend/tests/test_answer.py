@@ -295,6 +295,27 @@ def test_memory_answer_uses_conversation_note():
     assert "一般健康信息" not in text
 
 
+def test_graph_stores_non_fact_detail_in_memory(tmp_path):
+    """没进结构化字段的第一人称细节，要进入会话记忆卡。"""
+    with get_saver(str(tmp_path / "memory.sqlite")) as saver:
+        app = build_graph(checkpointer=saver)
+        config = {"configurable": {"thread_id": "memory"}}
+
+        app.invoke(
+            {"latest_user_message": "头部不适两天，前额，程度轻，伴有恶心，无病史"},
+            config=config,
+        )
+        result = app.invoke({"latest_user_message": "我下周要出差"}, config=config)
+
+        details = result["session_memory"]["details"]
+        assert any("出差" in item["text"] for item in details)
+
+        context = answer_module.build_context(ConsultationState(**result))
+        assert any(
+            "出差" in item["text"] for item in context["session_memory"]["details"]
+        )
+
+
 def test_blocked_answer_is_safe():
     """兜底文案本身要能通过输出层校验。"""
     from backend.app.safety.output_rail import check

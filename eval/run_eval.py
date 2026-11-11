@@ -326,6 +326,9 @@ def run(
     output_dir.mkdir(parents=True, exist_ok=True)
     # 保存调用前的 USE_MODEL 值，保证结束时可以还原用户环境。
     original_use_model = os.environ.get("USE_MODEL")
+    # 评测是离线测量，不应被进程内限流打断；限流本身由 test_ratelimit.py 覆盖。
+    original_rate_limit = os.environ.get("RATE_LIMIT_ENABLED")
+    os.environ["RATE_LIMIT_ENABLED"] = "0"
     # 默认强制 mock 决策器；传 --use-model 时才调用真实模型。
     os.environ["USE_MODEL"] = "1" if use_model else "0"
     # 创建 FastAPI 客户端；服务端异常会变成 500 响应而不是在此处直接抛出。
@@ -352,6 +355,10 @@ def run(
         else:
             # 原本设置过 USE_MODEL 时，将它恢复为旧值。
             os.environ["USE_MODEL"] = original_use_model
+        if original_rate_limit is None:
+            os.environ.pop("RATE_LIMIT_ENABLED", None)
+        else:
+            os.environ["RATE_LIMIT_ENABLED"] = original_rate_limit
 
     # 生成 JSONL 结果文件的路径。
     jsonl_path = output_dir / "agent-eval-results.jsonl"

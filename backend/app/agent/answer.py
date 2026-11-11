@@ -10,6 +10,8 @@ import os
 import re
 
 from backend.app.agent.state import ConsultationState
+from backend.app.context.assembler import assemble_answer_context
+from backend.app.context.budget import ANSWER_RECENT_ITEMS as RECENT_CONVERSATION_ITEMS
 from backend.app.agent.general import (
     GENERAL_FALLBACK,
     date_answer as build_date_answer,
@@ -38,13 +40,9 @@ from backend.app.safety.rule_engine import final_check
 
 # 观测用的 prompt 标识：改 prompt 时同步升版本，才能按版本对比指标。
 PROMPT_NAME = "answer.followup"
-PROMPT_VERSION = "v4"
+PROMPT_VERSION = "v5"
 
 MAX_ANSWER_CHARS = 400
-
-# 追问回答只带最近这么多条对话（用户/助手各算一条）。
-# 抽成常量是为了让评测脚本和实现共用同一个窗口，避免两边写死不同数字。
-RECENT_CONVERSATION_ITEMS = 6
 
 SAFE_FALLBACK = (
     "本系统只提供模拟问诊与就医方向整理，不提供确诊、处方或用药建议。"
@@ -90,10 +88,11 @@ ANSWER_SYSTEM_PROMPT = """你是"模拟问诊"项目的追问回答器。用户�
 - collected_facts：已经收集到的字段
 - final_result：上一轮生成的结构化结果（可能包含就诊方向、风险提示和来源）
 - recent_conversation：最近几轮对话
+- session_memory：跨轮保留的用户细节（details）、未决问题和最近话题
 
 回答要求：
-1. 只根据 collected_facts、final_result 和 recent_conversation 回答，不新增诊断，不推断用户没说过的情况。
-   recent_conversation 只用于回答“我刚才说过什么”这类记忆问题，不要把它当成新的症状信息。
+1. 只根据 collected_facts、final_result、recent_conversation 和 session_memory 回答，不新增诊断，不推断用户没说过的情况。
+   recent_conversation 和 session_memory 只用于回答“我刚才说过什么”这类记忆问题，不要把它们当成新的症状信息。
 2. 不列举具体疾病名称，不做鉴别诊断。不要出现"可能是XX病""需要排查XX病"这类表述；
    需要解释原因时统一说"具体原因需要医生面诊判断"。
 3. 不使用可能引起焦虑的严重疾病名称。
@@ -108,8 +107,8 @@ ANSWER_SYSTEM_PROMPT = """你是"模拟问诊"项目的追问回答器。用户�
 10. 回答 20 到 200 个汉字，口语化，最多两段。
 11. grounded：布尔值。回答使用了 final_result 中的就诊方向、风险提示或知识库来源时为 true；
     只是通用健康常识（如空腹、挂号、准备材料、生活建议）时为 false。
-12. 用户问“我刚才说过什么”“之前提到的……”时，只复述 recent_conversation 里确实出现过的内容；
-    找不到就明确说“这轮对话里没有记录到”，不要猜，也不要用常识补全。
+12. 用户问“我刚才说过什么”“之前提到的……”时，先看 session_memory.details，再看 recent_conversation；
+    只复述确实出现过的内容；找不到就明确说“这轮对话里没有记录到”，不要猜，也不要用常识补全。
 13. 只输出 JSON：{"answer": "...", "grounded": true}，不要 Markdown 或额外字段。"""
 
 
@@ -127,12 +126,7 @@ def _usage_dict(usage: LLMResult | None) -> dict:
 
 def build_context(state: ConsultationState) -> dict:
     """只给回答节点需要的上下文，避免把整份状态塞进 prompt。"""
-    return {
-        "question": state.latest_user_message,
-        "collected_facts": state.collected_facts,
-        "final_result": state.final_result,
-        "recent_conversation": state.conversation[-RECENT_CONVERSATION_ITEMS:],
-    }
+    return assemble_answer_context(state)
 
 
 def generate_with_meta(
@@ -145,6 +139,7 @@ def generate_with_meta(
         attributes={
             "answer.result_status": state.final_result.get("status", ""),
             "answer.memory_reference": is_memory_reference(state.latest_user_message),
+            "answer.memory_details": len((state.session_memory or {}).get("details") or []),
         },
     ) as record:
         reply, usage = chat_structured(

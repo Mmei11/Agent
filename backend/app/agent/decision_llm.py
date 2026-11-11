@@ -3,13 +3,14 @@
 import json
 
 from backend.app.agent.state import ConsultationState
+from backend.app.context.assembler import assemble_reference_context
 from backend.app.llm.client import LLMResult, chat_structured
 from backend.app.llm.schemas import DecisionChoice
 from backend.app.observability import span
 
 # 观测用的 prompt 标识：改 prompt 时同步升版本，才能按版本对比指标。
 PROMPT_NAME = "decision.choose"
-PROMPT_VERSION = "v1"
+PROMPT_VERSION = "v2"
 
 DECISION_SYSTEM_PROMPT = """你是"模拟问诊"项目的动作选择器。你只决定下一步做什么，不做诊断，不建议科室，不给用药。
 
@@ -22,6 +23,8 @@ DECISION_SYSTEM_PROMPT = """你是"模拟问诊"项目的动作选择器。你�
 - last_question：上一轮问出口的那一句
 - tool_results：已经调用过的工具及其结果
 - followup_count / max_followups：已追问次数与上限
+- session_memory：跨轮保留的用户细节（只用于理解指代，不当作新事实）
+- recent_conversation：最近几轮对话（只用于理解指代）
 
 可选动作只有三个：
 1. ASK_FOLLOWUP：继续追问一个缺失字段
@@ -35,6 +38,8 @@ DECISION_SYSTEM_PROMPT = """你是"模拟问诊"项目的动作选择器。你�
 - 用户拒答但工具还没调用 → CALL_TOOL，先整理一次科室建议再结束。
 - 工具已经调用 → FINALIZE。FINALIZE 的前提是工具已调用。
 - 不要选择已经调用过的工具。
+- session_memory 和 recent_conversation 只用于理解用户指代；不要把它们当成新的症状事实。
+- 用户已经在 collected_facts 或 session_memory 里明确说过的信息，不要重复追问同一个字段。
 
 输出要求：
 - action：三个动作之一，必须与上下文一致。
@@ -48,6 +53,7 @@ def build_context(state: ConsultationState, max_followups: int) -> dict:
     """把模型做决定需要看到的东西打包成一个 dict。
 
     不含 risk_flags：命中风险的请求不会走到决策节点，传进去只会误导模型。
+    session_memory / recent_conversation 只帮助理解指代，不当作新事实。
     """
     return {
         "latest_user_message": state.latest_user_message,
@@ -59,6 +65,7 @@ def build_context(state: ConsultationState, max_followups: int) -> dict:
         "tool_results": state.tool_results,
         "followup_count": state.followup_count,
         "max_followups": max_followups,
+        **assemble_reference_context(state),
     }
 
 

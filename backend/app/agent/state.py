@@ -35,6 +35,13 @@ class ConsultationState(BaseModel):
     # 对话按轮追加，供刷新页面时从 SQLite 检查点恢复。
     conversation: Annotated[list, operator.add] = []
 
+    # --- 会话记忆（Phase B）---
+    # 只存“没进结构化字段、但值得跨轮记住”的用户细节：
+    # {"details": [{"text": "...", "turn": 2}], "open_questions": [...],
+    #  "recent_topic": "...", "turns": 4}
+    # 事实仍以 collected_facts 为准，结论仍以 final_result 为准，不在这里复制。
+    session_memory: dict = {}
+
     # --- 信息收集 ---
     # collected_facts：{"症状": "头痛", "部位": "前额", ...}
     # 你来决定用 dict 还是 list，以及是否需要追加合并

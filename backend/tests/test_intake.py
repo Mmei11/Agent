@@ -94,7 +94,7 @@ def test_llm_path_restores_blanket_negation(monkeypatch):
         cost_estimate=0.0,
     )
 
-    def fake_extract(_text):
+    def fake_extract(_text, **kwargs):
         return (
             {
                 "主要症状": ["头部不适"],
@@ -176,7 +176,7 @@ def test_auto_uses_llm_when_enabled(monkeypatch):
     monkeypatch.setattr(
         intake_llm,
         "extract_facts_with_meta",
-        lambda text: ({"主要症状": ["模型结果"]}, {}, usage),
+        lambda text, **kwargs: ({"主要症状": ["模型结果"]}, {}, usage),
     )
 
     meta = {}
@@ -193,7 +193,7 @@ def test_auto_falls_back_on_llm_error(monkeypatch):
     monkeypatch.setenv("USE_MODEL", "1")
     import backend.app.agent.intake_llm as intake_llm
 
-    def boom(text):
+    def boom(text, **kwargs):
         raise RuntimeError("model down")
 
     monkeypatch.setattr(intake_llm, "extract_facts_with_meta", boom)

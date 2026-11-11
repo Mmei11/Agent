@@ -52,7 +52,7 @@ def test_intake_merges_evidence_across_turns(monkeypatch):
     monkeypatch.setattr(
         intake_llm,
         "extract_facts_with_meta",
-        lambda text: (
+        lambda text, **kwargs: (
             {"主要症状": ["胀痛"]},
             {"主要症状": ["一阵一阵胀痛", "旧证据"]},
             usage,
@@ -97,6 +97,26 @@ def test_context_has_no_last_question_on_first_turn():
     )
 
     assert context["last_question"] is None
+
+
+def test_context_carries_memory_and_recent_conversation():
+    """决策上下文带上记忆卡与最近对话，帮助理解“刚才说的那个”。"""
+    state = ConsultationState(
+        latest_user_message="就按刚才说的时间",
+        session_memory={
+            "details": [{"text": "我下周要出差", "turn": 2}],
+            "open_questions": [],
+        },
+        conversation=[
+            {"role": "user", "text": "我下周要出差"},
+            {"role": "agent", "text": "好的"},
+        ],
+    )
+
+    context = build_context(state, max_followups=3)
+
+    assert context["session_memory"]["details"][0]["text"] == "我下周要出差"
+    assert context["recent_conversation"][0]["text"] == "我下周要出差"
 
 
 def test_context_never_exposes_risk_flags():

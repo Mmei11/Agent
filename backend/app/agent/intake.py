@@ -4,6 +4,7 @@ import os
 import re
 
 from backend.app.agent.state import ConsultationState
+from backend.app.memory.session_memory import update_memory
 from backend.app.observability import current_trace, span
 from backend.app.safety.input_rail import inspect
 
@@ -79,6 +80,7 @@ def compute_missing(collected: dict) -> list:
 def extract_facts_auto(message: str, meta: dict | None = None) -> tuple[dict, dict]:
     """USE_MODEL=1 时走模型抽取，返回（字段值, 证据）；失败或未启用时回退关键词。
 
+    intake 是解析器，只解析本轮原话；多轮指代交给 decision / answer 处理。
     meta 收集本次用了哪个抽取器和用量，由调用方写进 trace。
     """
     if os.getenv("USE_MODEL") == "1":
@@ -156,15 +158,24 @@ def intake(state: ConsultationState) -> dict:
     scope = current_trace()
     # 上一轮已经有结果：这一轮是追问，保留结果并交给回答节点。
     continuing = bool(state.final_result)
+    turn_id = state.turn_id + 1
+    memory = update_memory(
+        state.session_memory,
+        message=message,
+        new_facts=new_facts,
+        missing_fields=missing,
+        turn_id=turn_id,
+    )
 
     return {
-        "turn_id": state.turn_id + 1,
+        "turn_id": turn_id,
         "trace_id": scope.trace_id if scope else "",
         # 用脱敏后的文本回写，后续节点和 checkpoint 都不再持有原始 PII。
         "latest_user_message": message,
         "input_level": verdict.level,
         "input_labels": list(verdict.labels),
         "conversation": [{"role": "user", "text": message}],
+        "session_memory": memory,
         "collected_facts": collected,
         "fact_evidence": evidence,
         "missing_fields": missing,
