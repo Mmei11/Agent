@@ -121,6 +121,16 @@ def test_general_route_model_off_skips_router(monkeypatch):
 def test_graph_general_route_answers_without_field_question(monkeypatch):
     monkeypatch.setenv("USE_MODEL", "1")
     monkeypatch.setattr(opening, "route_reply", fake_general)
+    # 这条测试只关心 general 路由和首轮邀请，不依赖抽取器。
+    # 没有模型 Key 时关键词回退会把“早上好”里的“早上”抽成时间模式，
+    # 导致 collected_facts 非空、邀请被跳过；这里显式固定为空。
+    from backend.app.agent import intake as intake_module
+
+    monkeypatch.setattr(
+        intake_module,
+        "extract_facts_auto",
+        lambda message, meta=None: ({}, {}),
+    )
 
     app = build_graph()
     result = app.invoke({"latest_user_message": "早上好"})
