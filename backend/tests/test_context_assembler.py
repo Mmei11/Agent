@@ -28,6 +28,7 @@ def test_assemble_answer_context_includes_session_memory():
     state = ConsultationState(
         latest_user_message="我刚才说什么时候去？",
         session_memory={
+            "summary": "用户头痛两天，偏好下午就诊。",
             "details": [{"text": "我更喜欢下午去", "turn": 2}],
             "open_questions": [],
             "recent_topic": "我更喜欢下午去",
@@ -37,6 +38,7 @@ def test_assemble_answer_context_includes_session_memory():
     context = assemble_answer_context(state)
 
     assert context["question"] == "我刚才说什么时候去？"
+    assert context["session_memory"]["summary"] == "用户头痛两天，偏好下午就诊。"
     assert context["session_memory"]["details"][0]["text"] == "我更喜欢下午去"
     assert "recent_conversation" in context
 

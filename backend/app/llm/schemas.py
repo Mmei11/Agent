@@ -127,3 +127,15 @@ class RoutedReply(BaseModel):
         max_length=300,
         description="intent=general 时的简短自然回答；医疗问题留空",
     )
+
+
+class SessionSummary(BaseModel):
+    """长会话滚动摘要：只保留继续对话所需的上下文。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    summary: str = Field(
+        min_length=1,
+        max_length=300,
+        description="2 到 5 句、最多 300 字的会话摘要",
+    )

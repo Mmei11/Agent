@@ -40,7 +40,7 @@ from backend.app.safety.rule_engine import final_check
 
 # 观测用的 prompt 标识：改 prompt 时同步升版本，才能按版本对比指标。
 PROMPT_NAME = "answer.followup"
-PROMPT_VERSION = "v5"
+PROMPT_VERSION = "v6"
 
 MAX_ANSWER_CHARS = 400
 
@@ -88,7 +88,7 @@ ANSWER_SYSTEM_PROMPT = """你是"模拟问诊"项目的追问回答器。用户�
 - collected_facts：已经收集到的字段
 - final_result：上一轮生成的结构化结果（可能包含就诊方向、风险提示和来源）
 - recent_conversation：最近几轮对话
-- session_memory：跨轮保留的用户细节（details）、未决问题和最近话题
+- session_memory：跨轮保留的用户细节（summary 是更早对话的摘要，details 是最近细节）、未决问题和最近话题
 
 回答要求：
 1. 只根据 collected_facts、final_result、recent_conversation 和 session_memory 回答，不新增诊断，不推断用户没说过的情况。
@@ -107,7 +107,7 @@ ANSWER_SYSTEM_PROMPT = """你是"模拟问诊"项目的追问回答器。用户�
 10. 回答 20 到 200 个汉字，口语化，最多两段。
 11. grounded：布尔值。回答使用了 final_result 中的就诊方向、风险提示或知识库来源时为 true；
     只是通用健康常识（如空腹、挂号、准备材料、生活建议）时为 false。
-12. 用户问“我刚才说过什么”“之前提到的……”时，先看 session_memory.details，再看 recent_conversation；
+12. 用户问“我刚才说过什么”“之前提到的……”时，先看 session_memory.summary 和 details，再看 recent_conversation；
     只复述确实出现过的内容；找不到就明确说“这轮对话里没有记录到”，不要猜，也不要用常识补全。
 13. 只输出 JSON：{"answer": "...", "grounded": true}，不要 Markdown 或额外字段。"""
 

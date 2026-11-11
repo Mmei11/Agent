@@ -20,9 +20,10 @@ from __future__ import annotations
 from typing import Any
 
 # 最多保留多少条细节；超出后丢最旧的。
-DETAIL_MAX_ITEMS = 10
+# 加入 300 字滚动摘要后，为守住约 1.5K 字符的记忆卡预算，从 10 条收到 8 条。
+DETAIL_MAX_ITEMS = 8
 # 单条细节最多保留多少字，避免把整段长文塞进来。
-DETAIL_MAX_CHARS = 120
+DETAIL_MAX_CHARS = 90
 
 # 句末是这些字符时，视为“提问”而不是“陈述”。
 QUESTION_ENDINGS = ("?", "？", "吗", "吗？", "呢", "呢？")
@@ -125,8 +126,9 @@ def memory_view(
     *,
     max_items: int = 8,
     max_chars: int = 600,
+    max_summary_chars: int = 300,
 ) -> dict:
-    """给回答节点的紧凑视图：最近优先，按条数与字符预算裁剪。"""
+    """给回答节点的紧凑视图：摘要 + 最近细节，按条数与字符预算裁剪。"""
     source = list((memory or {}).get("details") or [])
     kept: list[dict] = []
     total = 0
@@ -142,6 +144,7 @@ def memory_view(
 
     kept.reverse()
     return {
+        "summary": str((memory or {}).get("summary") or "")[:max_summary_chars],
         "details": kept,
         "open_questions": list((memory or {}).get("open_questions") or [])[:6],
         "recent_topic": (memory or {}).get("recent_topic", ""),

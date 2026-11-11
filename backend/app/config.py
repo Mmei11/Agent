@@ -29,6 +29,7 @@ ALLOWED_NAMES = {
     "KNOWLEDGE_DB_URL",
     # 运行开关
     "USE_MODEL",
+    "SUMMARY_ENABLED",
     "CONSULTATION_DB_PATH",
     # Phase 6：图线程池大小（同时在跑的问诊轮次上限）
     "GRAPH_MAX_WORKERS",

@@ -257,7 +257,7 @@ curl -X DELETE http://localhost:8081/sessions/SESSION_ID
 curl -s http://localhost:8081/sessions/SESSION_ID/memory
 ```
 
-返回 `details`（跨轮保留的非字段细节）、`open_questions`、`recent_topic`、`turns`，以及一份渲染好的 Markdown `rendered`。这个接口只读，事实与结论仍以 `GET /sessions/{session_id}` 为准。前端右侧「当前会话」面板里的「查看记忆」按钮调用同一个接口，以弹层展示这份视图。
+返回 `summary`（更早对话的滚动摘要）、`details`（跨轮保留的非字段细节）、`open_questions`、`recent_topic`、`turns`，以及一份渲染好的 Markdown `rendered`。这个接口只读，事实与结论仍以 `GET /sessions/{session_id}` 为准。前端右侧「当前会话」面板里的「查看记忆」按钮调用同一个接口，以弹层展示这份视图。
 
 | 方法 | 路径 | 用途 |
 | --- | --- | --- |

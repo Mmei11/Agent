@@ -12,6 +12,8 @@ os.environ.setdefault("KNOWLEDGE_BACKEND", "stub")
 os.environ["AUTH_MODE"] = "off"
 # 测试默认关闭限流；test_ratelimit.py 会显式开启。
 os.environ["RATE_LIMIT_ENABLED"] = "0"
+# 长会话摘要会调用模型；单测默认关闭，需要时在用例里显式打开。
+os.environ.setdefault("SUMMARY_ENABLED", "0")
 # 图测试会触发风险审计；写到临时目录，避免污染仓库里的 logs/audit.jsonl。
 os.environ.setdefault(
     "AUDIT_LOG_PATH",

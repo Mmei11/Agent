@@ -96,6 +96,7 @@ def test_render_markdown_includes_turn_and_open_questions():
     text = render_markdown(
         "session-1",
         {
+            "summary": "用户头痛两天，偏好下午就诊。",
             "details": [{"text": "我下周要出差", "turn": 2}],
             "open_questions": ["部位"],
             "recent_topic": "我下周要出差",
@@ -103,6 +104,8 @@ def test_render_markdown_includes_turn_and_open_questions():
         turn_id=3,
     )
 
+    assert "## 更早对话摘要" in text
+    assert "用户头痛两天，偏好下午就诊。" in text
     assert "[第 2 轮] 我下周要出差" in text
     assert "- 部位" in text
     assert "最近话题" in text

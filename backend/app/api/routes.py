@@ -247,6 +247,7 @@ class SessionMemoryResponse(BaseModel):
 
     session_id: str
     turn_id: int = 0
+    summary: str = ""  # 更早对话的滚动摘要
     details: list = []  # [{"text": "...", "turn": 2}]
     open_questions: list = []  # 仍缺失的字段
     recent_topic: str = ""

@@ -447,3 +447,15 @@
 - 端到端（Docker，`USE_MODEL=1`）：同一条饮食问题返回 general 回答，`final_status` 为空、`followup_count=0`，未进入字段收集
 - 全量：495 tests；33/33 mock；模型模式小回归 E001/E009/E017/E021/E025/E027 **6/6** 通过；Docker backend 已重建为 router v2
 - 单测：新增 router eval 计分 2 条
+
+**2026-11-11 · Phase B 第 3 课：长会话滚动摘要**
+
+- 新增 `backend/app/memory/summary.py`：最近窗口之外累计 12 条触发；摘要 ≤300 字；模型失败保留旧摘要、游标不动，下一轮重试；没有旧摘要时用抽取式兜底
+- 新增 `backend/app/memory/summary_llm.py` + `SessionSummary` schema：把 `previous_summary` 与 `new_turns` 合并成新摘要
+- intake 接入：仅 `USE_MODEL=1` 且 `SUMMARY_ENABLED=1` 时触发；trace 记录 `summary_updated` / `summary_chars` / `summary_source`
+- answer prompt v6、decision prompt v3 读取 `session_memory.summary`
+- 导出视图与 API 增加 `summary` 字段
+- 预算调整：细节从 10 条 × 120 字收到 **8 条 × 90 字**，加上 300 字摘要后最坏 **1438 字符（约 1.44K）**，守住 1.5K 目标
+- 真实摘要调用：14 轮合成对话 → 113 字，599 输入 / 75 输出 token，覆盖症状、时间线、结论、出差约束、时间偏好、交通、社交来源和就诊准备
+- 测试：502 passed；M6 mock 的 `prompt` 仍为 1.000
+- 待补：>20 轮完整图会话的长期保持评测（M6 当前最长 8 轮，不会触发摘要）

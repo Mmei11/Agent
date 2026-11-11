@@ -5,6 +5,7 @@ import re
 
 from backend.app.agent.state import ConsultationState
 from backend.app.memory.session_memory import update_memory
+from backend.app.memory.summary import rollup_memory
 from backend.app.observability import current_trace, span
 from backend.app.safety.input_rail import inspect
 
@@ -166,6 +167,11 @@ def intake(state: ConsultationState) -> dict:
         missing_fields=missing,
         turn_id=turn_id,
     )
+    # 长会话滚动摘要：只摘要最近窗口之外的旧对话；mock 模式跳过，避免离线测试调用模型。
+    summary_before = int(memory.get("summary_upto_index") or 0)
+    if os.getenv("SUMMARY_ENABLED", "1") == "1" and os.getenv("USE_MODEL") == "1":
+        memory = rollup_memory(memory, state.conversation)
+    summary_updated = int(memory.get("summary_upto_index") or 0) != summary_before
 
     return {
         "turn_id": turn_id,
@@ -193,6 +199,9 @@ def intake(state: ConsultationState) -> dict:
                 "input_level": verdict.level,
                 "input_labels": list(verdict.labels),
                 "turn_kind": "followup" if continuing else "consultation",
+                "summary_updated": summary_updated,
+                "summary_chars": len(memory.get("summary") or ""),
+                "summary_source": memory.get("summary_source", ""),
                 "trace_id": scope.trace_id if scope else "",
                 **meta,
             }

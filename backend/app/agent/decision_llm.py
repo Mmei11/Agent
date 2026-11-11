@@ -10,7 +10,7 @@ from backend.app.observability import span
 
 # 观测用的 prompt 标识：改 prompt 时同步升版本，才能按版本对比指标。
 PROMPT_NAME = "decision.choose"
-PROMPT_VERSION = "v2"
+PROMPT_VERSION = "v3"
 
 DECISION_SYSTEM_PROMPT = """你是"模拟问诊"项目的动作选择器。你只决定下一步做什么，不做诊断，不建议科室，不给用药。
 
@@ -23,7 +23,7 @@ DECISION_SYSTEM_PROMPT = """你是"模拟问诊"项目的动作选择器。你�
 - last_question：上一轮问出口的那一句
 - tool_results：已经调用过的工具及其结果
 - followup_count / max_followups：已追问次数与上限
-- session_memory：跨轮保留的用户细节（只用于理解指代，不当作新事实）
+- session_memory：跨轮保留的用户细节与摘要（只用于理解指代，不当作新事实）
 - recent_conversation：最近几轮对话（只用于理解指代）
 
 可选动作只有三个：
@@ -39,7 +39,7 @@ DECISION_SYSTEM_PROMPT = """你是"模拟问诊"项目的动作选择器。你�
 - 工具已经调用 → FINALIZE。FINALIZE 的前提是工具已调用。
 - 不要选择已经调用过的工具。
 - session_memory 和 recent_conversation 只用于理解用户指代；不要把它们当成新的症状事实。
-- 用户已经在 collected_facts 或 session_memory 里明确说过的信息，不要重复追问同一个字段。
+- 用户已经在 collected_facts、session_memory.summary 或 session_memory.details 里明确说过的信息，不要重复追问同一个字段。
 
 输出要求：
 - action：三个动作之一，必须与上下文一致。

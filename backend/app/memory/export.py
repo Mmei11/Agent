@@ -21,6 +21,7 @@ def render_markdown(session_id: str, memory: dict | None, turn_id: int = 0) -> s
     details = list(memory.get("details") or [])
     open_questions = [str(item) for item in (memory.get("open_questions") or [])]
     recent_topic = _text(memory.get("recent_topic"), limit=300)
+    summary = _text(memory.get("summary"), limit=300)
 
     lines = [
         "# 会话记忆",
@@ -28,6 +29,10 @@ def render_markdown(session_id: str, memory: dict | None, turn_id: int = 0) -> s
         f"- 会话：`{session_id}`",
         f"- 轮次：{turn_id}",
         f"- 记住的细节：{len(details)} 条",
+        "",
+        "## 更早对话摘要",
+        "",
+        summary or "暂无。",
         "",
         "## 记住的细节",
         "",
@@ -63,6 +68,7 @@ def memory_payload(session_id: str, values: dict) -> dict:
     return {
         "session_id": session_id,
         "turn_id": turn_id,
+        "summary": memory.get("summary", ""),
         "details": list(memory.get("details") or []),
         "open_questions": list(memory.get("open_questions") or []),
         "recent_topic": memory.get("recent_topic", ""),

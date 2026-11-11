@@ -115,6 +115,7 @@ def test_get_session_memory_returns_details():
     assert resp.status_code == 200
     data = resp.json()
     assert data["session_id"] == sid
+    assert "summary" in data
     assert any("出差" in item["text"] for item in data["details"])
     assert "我下周要出差" in data["rendered"]
     assert "未决问题" in data["rendered"]
@@ -129,6 +130,7 @@ def test_get_session_memory_empty():
     assert resp.status_code == 200
     data = resp.json()
     assert data["details"] == []
+    assert data["summary"] == ""
     assert "暂无记忆细节" in data["rendered"]
 
 
