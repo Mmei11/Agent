@@ -24,3 +24,6 @@ eval/results/
 
 # macOS 目录元数据
 .DS_Store
+
+# 本地论文/无关大文件（不提交）
+lbm_tracker.pdf
