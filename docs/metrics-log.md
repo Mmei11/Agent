@@ -528,3 +528,12 @@
 - `registry.call_tool` 改为统一走 `DEFAULT_CATALOG`，外部工具与内部工具同一条执行路径；`KNOWLEDGE_BACKEND=stub` 仍只替换知识类工具
 - 集成测试连项目自己的 MCP server（stdio 子进程 + stub 知识库），验证工具发现、白名单、真实调用往返与启动失败包装
 - 单测：555 passed + 6 skipped（新增 16 条 MCP client 测试）
+
+**2026-11-13 · Phase C 第 6 课：MCP client（streamable HTTP）**
+
+- `MCPServerConfig` 支持 `transport="http"` + `url`（必须是 http/https）；stdio 与 http 字段二选一，缺项在解析期就被拒绝
+- `MCPSession._connect` 按 transport 分支：`streamable_http_client` 与 `stdio_client` 产出的都是 `(read, write)` 流，握手、发现、调用、熔断完全复用
+- `mcp_server` 增加 `--http --host --port` 入口，同一个工具契约既能 stdio 也能 HTTP 暴露
+- 集成测试启动真实 uvicorn MCP server，验证 HTTP 工具发现、调用往返、注册进目录后的 `prompt_entries` 与执行
+- 失败路径：连接失败包装成 `MCPClientError`；外部工具超时在契约层映射为 `error_kind="timeout"`
+- 单测：563 passed + 6 skipped（新增 8 条 HTTP 相关测试）

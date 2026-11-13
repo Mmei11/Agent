@@ -5,7 +5,10 @@
 
 import json
 import os
+import socket
+import subprocess
 import sys
+import time
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -65,6 +68,33 @@ def test_parse_skips_bad_and_duplicate_configs():
     )
 
     assert [config.name for config in configs] == ["a"]
+
+
+def test_parse_http_config():
+    configs = parse_server_configs(
+        json.dumps(
+            [
+                {
+                    "name": "web",
+                    "transport": "http",
+                    "url": "https://example.com/mcp",
+                    "allowed_tools": ["lookup"],
+                }
+            ]
+        )
+    )
+
+    assert configs[0].transport == "http"
+    assert configs[0].url == "https://example.com/mcp"
+    assert configs[0].command == ""
+
+
+def test_parse_rejects_non_http_url():
+    configs = parse_server_configs(
+        json.dumps([{"name": "x", "transport": "http", "url": "ftp://example.com"}])
+    )
+
+    assert configs == []
 
 
 def test_empty_servers_means_none():
@@ -268,3 +298,136 @@ def test_start_failure_is_wrapped():
 
     with pytest.raises(MCPClientError):
         session.start()
+
+
+def _free_port() -> int:
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        return sock.getsockname()[1]
+
+
+def _wait_port(port: int, timeout: float = 10.0) -> None:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            with socket.create_connection(("127.0.0.1", port), timeout=0.2):
+                return
+        except OSError:
+            time.sleep(0.05)
+    raise TimeoutError(f"HTTP server 未在 {timeout}s 内启动")
+
+
+@pytest.fixture(scope="module")
+def live_http_session():
+    port = _free_port()
+    process = subprocess.Popen(
+        [
+            sys.executable,
+            "-m",
+            "backend.app.tools.mcp_server",
+            "--http",
+            "--port",
+            str(port),
+        ],
+        cwd=str(ROOT),
+        env={**os.environ, "KNOWLEDGE_BACKEND": "stub", "PYTHONPATH": str(ROOT)},
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+
+    try:
+        _wait_port(port)
+        config = MCPServerConfig(
+            name="knowledge-http",
+            transport="http",
+            url=f"http://127.0.0.1:{port}/mcp",
+            allowed_tools=["department_route"],
+            timeout_s=10.0,
+            start_timeout_s=15.0,
+        )
+        session = MCPSession(config)
+        session.start()
+        try:
+            yield session
+        finally:
+            session.stop()
+    finally:
+        process.terminate()
+        try:
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            process.kill()
+
+
+def test_http_server_lists_contract_tools(live_http_session):
+    names = {tool.name for tool in live_http_session.tools}
+
+    assert names == set(KNOWLEDGE_TOOL_SPECS)
+
+
+def test_http_call_round_trip(live_http_session):
+    data = live_http_session.call("department_route", {"query": "头痛"})
+
+    assert data["department"] == "神经内科"
+
+
+def test_http_spec_registers_as_external(live_http_session):
+    config = MCPServerConfig(
+        name="knowledge-http",
+        transport="http",
+        url="http://127.0.0.1:1/mcp",
+        allowed_tools=["department_route"],
+    )
+
+    specs = build_tool_specs(live_http_session, config)
+
+    assert [spec.name for spec in specs] == ["department_route"]
+    assert specs[0].scope == "external"
+    result = specs[0].call({"query": "头痛"})
+    assert result.ok
+    assert result.data["department"] == "神经内科"
+
+
+def test_external_tool_reaches_catalog_prompt(live_http_session):
+    config = MCPServerConfig(
+        name="knowledge-http",
+        transport="http",
+        url="http://127.0.0.1:1/mcp",
+        allowed_tools=["department_route"],
+    )
+    catalog = ToolCatalog()
+    for spec in build_tool_specs(live_http_session, config):
+        catalog.register(spec)
+
+    entry = next(item for item in catalog.prompt_entries() if item["name"] == "department_route")
+
+    assert entry["scope"] == "external"
+    assert entry["risk_class"] == "read_only"
+    assert catalog.call("department_route", {"query": "头痛"}).data["department"] == "神经内科"
+
+
+def test_external_timeout_maps_to_structured_error():
+    class _SlowSession(_FakeSession):
+        def call(self, name, arguments):
+            raise TimeoutError("模拟超时")
+
+    config = MCPServerConfig(name="slow", command="python", allowed_tools=["slow"])
+    spec = build_tool_specs(_SlowSession([_tool("slow")]), config)[0]
+
+    result = spec.call({"query": "头痛"})
+
+    assert not result.ok
+    assert result.error_kind == "timeout"
+
+
+def test_http_connection_failure_is_wrapped():
+    port = _free_port()
+    config = MCPServerConfig(
+        name="down",
+        transport="http",
+        url=f"http://127.0.0.1:{port}/mcp",
+        start_timeout_s=3.0,
+    )
+
+    with pytest.raises(MCPClientError):
+        MCPSession(config).start()

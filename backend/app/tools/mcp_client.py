@@ -24,6 +24,7 @@ from typing import Callable, Literal
 
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
+from mcp.client.streamable_http import streamable_http_client
 from pydantic import BaseModel, create_model
 
 from backend.app.config import load_env_file
@@ -45,10 +46,12 @@ class MCPServerConfig:
 
     name: str
     transport: Transport = "stdio"
+    # stdio 用 command/args/env/cwd；http 用 url。两套字段按 transport 二选一。
     command: str = ""
     args: list[str] = field(default_factory=list)
     env: dict[str, str] | None = None
     cwd: str | None = None
+    url: str = ""
     allowed_tools: list[str] = field(default_factory=list)
     timeout_s: float = 8.0
     start_timeout_s: float = 10.0
@@ -63,13 +66,21 @@ class MCPServerConfig:
             raise ValueError("MCP server 缺少 name")
 
         transport = str(payload.get("transport") or "stdio")
-        if transport != "stdio":
-            # HTTP 适配器下一课接；现在明确拒绝，而不是悄悄忽略。
-            raise ValueError(f"暂不支持 transport={transport}")
+        if transport not in ("stdio", "http"):
+            raise ValueError(f"不支持的 transport={transport}")
 
-        command = str(payload.get("command") or "").strip()
-        if not command:
-            raise ValueError(f"MCP server {name} 缺少 command")
+        command = ""
+        url = ""
+        if transport == "http":
+            url = str(payload.get("url") or "").strip()
+            if not url:
+                raise ValueError(f"MCP server {name} 缺少 url")
+            if not url.startswith(("http://", "https://")):
+                raise ValueError(f"MCP server {name} 的 url 必须是 http(s)")
+        else:
+            command = str(payload.get("command") or "").strip()
+            if not command:
+                raise ValueError(f"MCP server {name} 缺少 command")
 
         return cls(
             name=name,
@@ -80,6 +91,7 @@ class MCPServerConfig:
             if isinstance(payload.get("env"), dict)
             else None,
             cwd=str(payload["cwd"]) if payload.get("cwd") else None,
+            url=url,
             allowed_tools=[str(item) for item in payload.get("allowed_tools") or []],
             timeout_s=float(payload.get("timeout_s") or 8.0),
             start_timeout_s=float(payload.get("start_timeout_s") or 10.0),
@@ -238,13 +250,21 @@ class MCPSession:
 
     async def _connect(self) -> None:
         self._stack = AsyncExitStack()
-        params = StdioServerParameters(
-            command=self.config.command,
-            args=list(self.config.args),
-            env=self.config.env,
-            cwd=self.config.cwd,
-        )
-        read, write = await self._stack.enter_async_context(stdio_client(params))
+
+        if self.config.transport == "http":
+            # 两种 transport 产出的都是 (read, write) 流，后面完全一致。
+            read, write = await self._stack.enter_async_context(
+                streamable_http_client(self.config.url)
+            )
+        else:
+            params = StdioServerParameters(
+                command=self.config.command,
+                args=list(self.config.args),
+                env=self.config.env,
+                cwd=self.config.cwd,
+            )
+            read, write = await self._stack.enter_async_context(stdio_client(params))
+
         self._session = await self._stack.enter_async_context(ClientSession(read, write))
         await self._session.initialize()
         self.tools = list((await self._session.list_tools()).tools)

@@ -254,7 +254,7 @@
 
 ### Phase C｜工具运行时与 MCP client（5–7 天）
 
-> 进展（2026-11-13）：MCP client 的 stdio 通道已落地——`MCPSession` 桥接 async 会话，白名单解析、动态参数模型、熔断与失败分类齐备；外部工具默认关闭，注册后与内部工具走同一份目录。下一步：streamable HTTP 适配器、外部工具运行时评测（超时降级到"暂无依据"）与 `red_flag_lookup` 的真实场景。
+> 进展（2026-11-13）：MCP client 的 stdio 与 streamable HTTP 通道均已落地；`mcp_server` 支持 `--http` 入口，HTTP 集成测试走真实 uvicorn 往返。外部工具默认关闭，白名单 fail-close，只以 read_only/external 注册。下一步：外部工具运行时评测（超时降级到"暂无依据"）与 `red_flag_lookup` 的真实场景。
 
 **工程问题：** 工具契约已经很完整，但决策层不会选工具、不会传参数；外部 MCP 工具没有入口；工具结果没有摘要；多个工具之间没有调用预算。
 

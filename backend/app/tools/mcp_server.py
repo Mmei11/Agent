@@ -5,9 +5,11 @@
 和内嵌调用完全一致。
 
 启动：
-    uv run python -m backend.app.tools.mcp_server
+    uv run python -m backend.app.tools.mcp_server                 # stdio
+    uv run python -m backend.app.tools.mcp_server --http --port 8765  # streamable HTTP
 """
 
+import argparse
 import asyncio
 import json
 from typing import Annotated, Literal
@@ -84,7 +86,18 @@ def guideline_retrieve_tool(
 
 
 def main() -> None:
-    asyncio.run(server.run_stdio_async())
+    parser = argparse.ArgumentParser(description="把知识工具以 MCP 暴露出去")
+    parser.add_argument(
+        "--http", action="store_true", help="用 streamable HTTP 而不是 stdio"
+    )
+    parser.add_argument("--host", default="127.0.0.1")
+    parser.add_argument("--port", type=int, default=8000)
+    args = parser.parse_args()
+
+    if args.http:
+        asyncio.run(server.run_streamable_http_async(host=args.host, port=args.port))
+    else:
+        asyncio.run(server.run_stdio_async())
 
 
 if __name__ == "__main__":
