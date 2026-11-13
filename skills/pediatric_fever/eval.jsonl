@@ -1,0 +1,4 @@
+{"id": "PE01", "message": "孩子三岁，头痛两天，三十八度五，没有其他不适，精神好", "expected_skill": "pediatric_fever", "expected_status": "completed", "expected_next_step_contains": "体温记录", "forbidden_tools": []}
+{"id": "PE02", "message": "孩子三岁，发烧三十八度五", "expected_skill": "pediatric_fever", "expected_action": "ASK_FOLLOWUP", "expected_question_contains": "持续多久", "forbidden_tools": []}
+{"id": "PE03", "message": "宝宝一岁半，昨晚开始发热", "expected_skill": "pediatric_fever", "expected_action": "ASK_FOLLOWUP", "expected_question_contains": "体温", "forbidden_tools": []}
+{"id": "PE04", "message": "儿童发烧两天，精神差", "expected_skill": "pediatric_fever", "expected_action": "ASK_FOLLOWUP", "expected_question_contains": "多大", "forbidden_tools": []}

@@ -3,6 +3,7 @@
 from backend.app.llm.client import LLMResult, chat_structured
 from backend.app.llm.schemas import FIELD_MAP, IntakeFacts
 from backend.app.safety.rule_engine import check_negation
+from backend.app.prompts import load_prompt
 
 # 症状类字段才需要"证据本身以否定词开头"的额外检查。
 # 背景字段的"无病史""没有过敏史"是有效信息，不能当否定丢掉。
@@ -53,38 +54,7 @@ FACTOR_CUES = (
     "服药后",
 )
 
-SYSTEM_PROMPT = """你是"模拟问诊"项目的信息抽取器。用户会给你一句虚构病例描述。
-你只做信息抽取，不做诊断，不建议科室，不给用药。
-
-输出一个 JSON 对象，包含以下字段，每个字段都是数组；没抽到就返回 []：
-- chief_complaint 主要症状
-- duration 持续时间（含起病时间）
-- location 部位
-- severity 程度（只描述主要症状）
-- associated 伴随表现
-- background 已知背景
-- aggravating 加重缓解因素
-- pattern 时间模式（发作规律与频次）
-- measurement 测量值（体温、血压等）
-- age 年龄（月龄或岁）
-- mental_status 精神状态（精神好/差、嗜睡、哭闹等）
-
-每个数组元素包含三个键：
-- value：字段内容，取原文中最短的完整片段，不归一化、不解释
-- evidence：原文中逐字出现的片段，用来证明这个值确实来自原文
-- confidence：0 到 1 的自评置信度
-
-硬规则：
-1. 只抽取原文明确出现的信息，不推断、不补全。
-2. evidence 必须能在原文里逐字找到；找不到就不要输出这个字段。
-3. 否定表达不计入。"没有发热"不填 associated；"没有呼吸困难"不填 chief_complaint。
-4. value 保留原文用词："已经三天了" → "三天"；"三十八度五" → "三十八度五"。
-5. 起病时间归 duration（如"今天早上开始的"）；发作规律和频次归 pattern
-   （如"一阵一阵""晚上更疼""拉了四五次"）。
-6. 用户拒答、无法描述、只给背景时，所有字段返回 []。
-7. value 也必须是原文中连续出现的片段；不能输出原文没有的词或归纳结论。
-   例如用户说"吃了药还是疼"，不能输出 value="缓解"。
-8. 只输出 JSON，不要 Markdown、解释或额外字段。"""
+SYSTEM_PROMPT = load_prompt(PROMPT_NAME, PROMPT_VERSION)
 
 
 def _is_negated(text: str, fact, field: str) -> bool:

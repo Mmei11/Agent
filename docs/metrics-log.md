@@ -603,3 +603,14 @@
   - model **1.000**
 - 修复真实两轮会话：`孩子三岁…` → 追问 → `无病史` 继续走儿科链路，不再回普通聊天
 - 单测 **655 passed**
+
+**2026-11-13 · Phase D 第 5–6 课：prompts 迁移、技能评测与收尾**
+
+- 6 个模块的 system prompt 迁到 `prompts/<模块>/<版本>.txt`（intake/decision/router/followup/answer/drug）；`backend/app/prompts.py` 统一加载，`PROMPTS_DIR` 可覆盖；Dockerfile 补 `COPY prompts`
+- `prompt.version` 仍由模块常量提供，与文件名版本一一对应；prompt 加载失败会明确报错
+- 新增 `skills/headache/eval.jsonl` 与 `skills/pediatric_fever/eval.jsonl`（各 4 条，覆盖完成/追问）
+- 新增 `eval/skill_eval.py`：按技能跑图、校验技能/动作/问题/结果模板/禁用工具，默认 mock，门禁 0.9
+- `eval/skill_routing.py` 增加 `--min-accuracy` 门禁；CI quality job 接入 M9 rule 与技能评测
+- 回退验证：坏 manifest 跳过、default 兜底、`SKILLS_ENABLED=0` 图内回 default、prompt 缺失明确失败
+- 结果：M9 20 条 rule/hybrid/model 均 **1.000**；技能评测 **8/8 = 1.000**；主案例 dev **26/26**
+- 单测 **659 passed**

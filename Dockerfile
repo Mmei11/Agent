@@ -20,6 +20,7 @@ RUN uv sync --locked --no-dev
 
 COPY backend ./backend
 COPY skills ./skills
+COPY prompts ./prompts
 
 USER app
 EXPOSE 8000

@@ -254,7 +254,7 @@
 
 ### Phase C｜工具运行时与 MCP client（5–7 天）
 
-> 进展（2026-11-13）：Phase C 验收项已全部落地，并接入 10 个真实外部 MCP 工具与统一中文摘要。Phase D 第 1–4 课完成：技能包与 manifest、规则/模型技能路由、图内 `skill_route`、按技能字段/追问/输出模板/工具白名单，以及短回答医疗链路粘性。M9 扩到每技能 10 条，rule / hybrid / model 三种模式均 **1.000**。下一步：prompts/ 迁移与每技能独立评测集。
+> 进展（2026-11-13）：Phase C 与 Phase D 均完成。Phase D 落地了三个技能包（default/headache/pediatric_fever）、manifest 契约、规则/模型/hybrid 技能路由、图内 `skill_route`、按技能字段/追问/输出模板/工具白名单、短回答医疗链路粘性；prompts 已版本化迁移，M9 每技能 10 条（rule/hybrid/model 均 1.000），技能评测 8/8，CI 已接入 M9 与技能评测门禁。下一步进入 Phase E（可选）或 Phase F 产品与合规收尾。
 
 **工程问题：** 工具契约已经很完整，但决策层不会选工具、不会传参数；外部 MCP 工具没有入口；工具结果没有摘要；多个工具之间没有调用预算。
 

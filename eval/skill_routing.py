@@ -88,6 +88,7 @@ def main() -> int:
     parser.add_argument(
         "--mode", choices=["rule", "model", "hybrid"], default="hybrid"
     )
+    parser.add_argument("--min-accuracy", type=float, default=0.9)
     args = parser.parse_args()
 
     output_dir = args.output_dir
@@ -153,6 +154,23 @@ def main() -> int:
                 f"M9 [{args.mode}] 完成：{result['enabled']} 条，"
                 f"准确率 {result['accuracy']}；报告：{report_path}"
             )
+            below = [
+                group
+                for group in result["groups"]
+                if group["accuracy"] is None
+                or group["accuracy"] < args.min_accuracy
+            ]
+            if result["accuracy"] is None or result["accuracy"] < args.min_accuracy:
+                print(f"未达门禁：整体 {result['accuracy']} < {args.min_accuracy}")
+                return 1
+            if below:
+                print(
+                    "未达门禁："
+                    + ", ".join(
+                        f"{group['skill']}={group['accuracy']}" for group in below
+                    )
+                )
+                return 1
             return 0
 
     report_path.write_text(

@@ -21,6 +21,10 @@ jobs:
       USE_MODEL: "0"
       # CI 没有向量库，知识工具用确定性替身跑流程；检索质量由本地评测负责
       KNOWLEDGE_BACKEND: "stub"
+      # 技能层：CI 只用规则路由，避免依赖模型 Key。
+      SKILLS_ENABLED: "1"
+      SKILL_ROUTER_MODE: "rule"
+      MCP_ENABLED: "0"
       # 评测脚本不经 conftest，必须显式关掉鉴权与限流，避免脚本被 401/429 拦住。
       AUTH_MODE: "off"
       RATE_LIMIT_ENABLED: "0"
@@ -44,6 +48,12 @@ jobs:
 
       - name: Hard assertions (dev only)
         run: uv run python -m eval.run_eval --split dev
+
+      - name: Skill routing (rule, gate 0.9)
+        run: uv run python -m eval.skill_routing --mode rule --min-accuracy 0.9
+
+      - name: Skill eval (mock, gate 0.9)
+        run: uv run python -m eval.skill_eval --min-accuracy 0.9
 
       - name: Red team (dev only)
         run: uv run python -m eval.red_team --split dev
@@ -70,6 +80,8 @@ jobs:
             eval/results/redteam/redteam-report.md
             eval/results/risk-probe-ci.json
             eval/results/adversarial-ci.json
+            eval/results/skill-routing/skill-routing-report-rule.md
+            eval/results/skill-eval/skill-eval-report.md
           if-no-files-found: ignore
 
   docker:

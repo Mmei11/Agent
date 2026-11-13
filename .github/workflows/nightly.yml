@@ -32,6 +32,9 @@ jobs:
       RATE_LIMIT_ENABLED: "0"
       # 夜间跑真实检索：连下面 services 里的 pgvector，而不是 stub。
       KNOWLEDGE_DB_URL: postgresql://postgres:postgres@127.0.0.1:5433/knowledge
+      SKILLS_ENABLED: "1"
+      SKILL_ROUTER_MODE: "hybrid"
+      MCP_ENABLED: "0"
     services:
       # recall 评测必须连真库：stub 只跑流程，量不出检索质量。
       pgvector:
@@ -81,6 +84,12 @@ jobs:
       - name: Model-mode hard assertions (dev)
         run: uv run python -m eval.run_eval --use-model --split dev
 
+      - name: Model-mode skill routing (gate 0.9)
+        run: uv run python -m eval.skill_routing --mode model --min-accuracy 0.9
+
+      - name: Model-mode skill eval (gate 0.9)
+        run: uv run python -m eval.skill_eval --use-model --min-accuracy 0.9
+
       - name: Model-mode red team (all)
         run: uv run python -m eval.red_team --use-model --split all
 
@@ -100,5 +109,7 @@ jobs:
             eval/results/agent-eval-report.md
             eval/results/redteam/redteam-report.md
             eval/results/nightly-repeat/repeat-report.md
+            eval/results/skill-routing/skill-routing-report-model.md
+            eval/results/skill-eval/skill-eval-report.md
             logs/audit.jsonl
           if-no-files-found: ignore

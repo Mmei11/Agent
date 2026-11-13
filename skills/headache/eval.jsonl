@@ -1,0 +1,4 @@
+{"id": "HA01", "message": "头部不适两天，前额，程度轻，暂无其他不适，无病史", "expected_skill": "headache", "expected_status": "completed", "expected_next_step_contains": "头痛记录", "forbidden_tools": []}
+{"id": "HA02", "message": "头痛两天了", "expected_skill": "headache", "expected_action": "ASK_FOLLOWUP", "expected_question_contains": "哪个部位", "forbidden_tools": []}
+{"id": "HA03", "message": "太阳穴跳痛，昨天开始的", "expected_skill": "headache", "expected_action": "ASK_FOLLOWUP", "forbidden_tools": []}
+{"id": "HA04", "message": "偏头痛又犯了，怕光", "expected_skill": "headache", "expected_action": "ASK_FOLLOWUP", "expected_question_contains": "持续多久", "forbidden_tools": []}

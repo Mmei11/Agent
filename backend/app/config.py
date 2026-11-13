@@ -60,6 +60,7 @@ ALLOWED_NAMES = {
     "SKILLS_ENABLED",
     "SKILLS_DIR",
     "SKILL_ROUTER_MODE",
+    "PROMPTS_DIR",
     # 本地轨迹
     "TRACE_SINK",
     "TRACE_PATH",
