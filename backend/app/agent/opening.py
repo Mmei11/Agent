@@ -914,7 +914,7 @@ def _trial_record_text(text: str) -> str:
     if sponsor:
         lines.append(f"发起方：{_clip_plain(sponsor.group(1), 50)}")
     if dates:
-        lines.append(f"时间：{_clip_plain(dates.group(1), 80)}")
+        lines.append(f"时间：{_clip_plain(dates.group(1), 140)}")
     lines.append(
         "来源：ClinicalTrials.gov。试验信息不代表适合你，是否入组需由研究方评估。"
     )
@@ -1056,6 +1056,9 @@ def _pubmed_article_text(text: str) -> str:
     lines = [f"PubMed 文献：{_clip_plain(title.group(1), 80)}"]
     if journal:
         lines.append(f"期刊：{_clip_plain(journal.group(1), 80)}")
+    pmid = re.search(r"\*\*PMID:\*\*\s*(\d+)", text)
+    if pmid:
+        lines.append(f"PMID：{pmid.group(1)}")
     if doi:
         lines.append(f"DOI：{doi.group(1)}")
     if abstract:

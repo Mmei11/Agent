@@ -501,6 +501,7 @@ def test_pubmed_article_by_pmid(monkeypatch):
     text = result["rendered_text"]
     assert "PubMed 文献" in text
     assert "BACKGROUND" in text
+    assert "PMID：40679934" in text
     assert "DOI：10.1164/rccm.202507-1692ST" in text
 
 
