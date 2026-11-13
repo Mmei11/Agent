@@ -10,7 +10,7 @@ from backend.app.skills.registry import (
     reset_skills_cache,
     skills_dir,
 )
-from backend.app.skills.router import route
+from backend.app.skills.router import route, route_model, route_rule
 
 __all__ = [
     "allowed_tools",
@@ -21,6 +21,8 @@ __all__ = [
     "load_skill",
     "reset_skills_cache",
     "route",
+    "route_model",
+    "route_rule",
     "skill_for",
     "skills_dir",
 ]

@@ -590,3 +590,16 @@
 - `_default_tool`、`_resolve_tool`、`rule_decision` 都按技能白名单选择；decision prompt 升到 v6
 - 测试覆盖：受限技能只能看到 `guideline_retrieve`，模型选 `department_route` 会被替换；default 输出文案不变
 - 单测 **649 passed**
+
+**2026-11-13 · Phase D 第 4 课：模型技能路由与短回答粘性**
+
+- `skills/router.py` 拆成 `route_rule` / `route_model` / `route`；`SKILL_ROUTER_MODE=rule|model|hybrid`
+- hybrid：规则明确命中直接用；规则落 default 时才问模型；模型失败/越界回退 default
+- 模型只收到技能摘要（名字/标题/一句话描述），不加载 SKILL.md
+- 短回答粘性：会话已选技能且仍有缺失字段时，20 字以内、无问号、非日期/会话查询，且“像在回答上一问”（能抽出字段或明确否认）才留在医疗链路；谢谢/天气/身份类短句不劫持
+- M9 扩到每技能 10 条（headache 10、pediatric_fever 10，含 dev/holdout）：
+  - rule **1.000**
+  - hybrid **1.000**
+  - model **1.000**
+- 修复真实两轮会话：`孩子三岁…` → 追问 → `无病史` 继续走儿科链路，不再回普通聊天
+- 单测 **655 passed**

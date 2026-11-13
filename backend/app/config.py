@@ -59,6 +59,7 @@ ALLOWED_NAMES = {
     # Phase D：技能层。SKILLS_ENABLED=0 时只保留 default 技能。
     "SKILLS_ENABLED",
     "SKILLS_DIR",
+    "SKILL_ROUTER_MODE",
     # 本地轨迹
     "TRACE_SINK",
     "TRACE_PATH",

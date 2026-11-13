@@ -6,6 +6,7 @@
 import re
 from datetime import datetime, timedelta, timezone
 
+from backend.app.agent.session_info import is_session_info_query
 from backend.app.drugs.lookup import load_labels
 from backend.app.safety.rule_engine import screen
 
@@ -274,6 +275,58 @@ def is_date_question(message: str) -> bool:
             "今天是什么",
         )
     )
+
+
+def looks_like_followup_answer(message: str, max_chars: int = 20) -> bool:
+    """短、无问号、不是日期/会话查询，且内容像在补充字段时才留在医疗链路。
+
+    只靠“短 + 没问号”会把“谢谢”“今天天气怎么样”也误判成回答；
+    这里再加一层：消息必须能抽出字段，或明确是在否认/拒答。
+    """
+    text = (message or "").strip()
+    if not text or len(text) > max_chars:
+        return False
+    if "?" in text or "？" in text:
+        return False
+    if is_date_question(text) or is_session_info_query(text):
+        return False
+    if any(phrase in text for phrase in FOLLOWUP_STOP_PHRASES):
+        return False
+    if any(hint in text for hint in GENERAL_TOPIC_HINTS):
+        return False
+
+    # 延迟导入，避免 general ↔ intake 的模块级循环。
+    from backend.app.agent.intake import extract_facts
+
+    if extract_facts(text):
+        return True
+    return text.strip("。！!，, ") in {"没有", "无", "不知道", "不清楚", "不记得", "没"}
+
+
+FOLLOWUP_STOP_PHRASES = (
+    "谢谢",
+    "好的",
+    "好",
+    "嗯",
+    "知道了",
+    "明白了",
+    "再见",
+    "不用了",
+    "先这样",
+    "没事了",
+)
+
+GENERAL_TOPIC_HINTS = (
+    "天气",
+    "新闻",
+    "时间",
+    "几点",
+    "日期",
+    "你能做什么",
+    "你是谁",
+    "介绍一下你",
+    "讲个笑话",
+)
 
 
 def date_answer(message: str) -> str:

@@ -29,6 +29,7 @@ from backend.app.agent.general import (
     is_red_flag_question,
     is_research_question,
     is_shortage_question,
+    looks_like_followup_answer,
     red_flag_answer_is_safe,
     translated_external_is_safe,
 )
@@ -1189,6 +1190,13 @@ def route_general(state: ConsultationState) -> dict:
     # 就医准备类问题先走确定性工具，不依赖模型是否把它判成普通问题。
     if is_guideline_question(state.latest_user_message):
         return answer_guideline(state, node="general_route")
+
+    # 已经进入医疗技能、仍有缺失字段时，短回答留在医疗链路，
+    # 避免“无病史”这类回答被单路由当成普通聊天。
+    if state.skill and state.missing_fields and looks_like_followup_answer(
+        state.latest_user_message
+    ):
+        return {"next_action": "MEDICAL"}
 
     if os.getenv("USE_MODEL") != "1":
         return {"next_action": "MEDICAL"}

@@ -6,11 +6,15 @@ import yaml
 from backend.app.agent.decision import Decision, validate_decision
 from backend.app.agent.decision_llm import build_context
 from backend.app.agent.followup import followup
+from backend.app.agent.general import looks_like_followup_answer
 from backend.app.agent.intake import extract_facts
+from backend.app.agent.opening import route_general
 from backend.app.agent.result import build_completed_result
 from backend.app.agent.skill_route import skill_route
 from backend.app.agent.state import ConsultationState
+from backend.app.llm.client import LLMError
 from backend.app.skills import registry
+from backend.app.skills import router as skill_router
 from backend.app.skills.registry import (
     DEFAULT_NAME,
     list_skill_summaries,
@@ -18,7 +22,7 @@ from backend.app.skills.registry import (
     repo_root,
     reset_skills_cache,
 )
-from backend.app.skills.router import route
+from backend.app.skills.router import SkillChoice, route
 
 
 @pytest.fixture(autouse=True)
@@ -263,3 +267,78 @@ def test_default_output_template_stays_unchanged():
     )
 
     assert result["next_step"] == "建议就诊方向：神经内科"
+
+
+def test_model_router_accepts_valid_skill(monkeypatch):
+    monkeypatch.setenv("USE_MODEL", "1")
+    monkeypatch.setattr(
+        skill_router,
+        "chat_structured",
+        lambda *args, **kwargs: (
+            SkillChoice(skill="headache", reason="头痛", confidence=0.9),
+            None,
+        ),
+    )
+
+    assert skill_router.route_model("脑袋不舒服") == "headache"
+
+
+def test_model_router_falls_back_on_invalid_skill(monkeypatch):
+    monkeypatch.setenv("USE_MODEL", "1")
+    monkeypatch.setattr(
+        skill_router,
+        "chat_structured",
+        lambda *args, **kwargs: (SkillChoice(skill="unknown", confidence=0.9), None),
+    )
+
+    assert skill_router.route_model("脑袋不舒服") == DEFAULT_NAME
+
+
+def test_model_router_falls_back_on_error(monkeypatch):
+    monkeypatch.setenv("USE_MODEL", "1")
+
+    def boom(*args, **kwargs):
+        raise LLMError("模型不可用", retryable=False)
+
+    monkeypatch.setattr(skill_router, "chat_structured", boom)
+
+    assert skill_router.route_model("脑袋不舒服") == DEFAULT_NAME
+
+
+def test_hybrid_prefers_rule_match(monkeypatch):
+    def boom(*args, **kwargs):
+        raise AssertionError("规则明确命中时不应调用模型")
+
+    monkeypatch.setattr(skill_router, "route_model", boom)
+
+    assert skill_router.route("头痛两天") == "headache"
+
+
+def test_looks_like_followup_answer():
+    assert looks_like_followup_answer("无病史")
+    assert looks_like_followup_answer("轻微")
+    assert looks_like_followup_answer("两天")
+    assert not looks_like_followup_answer("今天几号")
+    assert not looks_like_followup_answer("你记录了什么")
+    assert not looks_like_followup_answer("我还需要做什么？")
+    assert not looks_like_followup_answer("谢谢")
+    assert not looks_like_followup_answer("今天天气怎么样")
+    assert not looks_like_followup_answer("这是一段明显超过二十个字的补充描述内容，用来测试长度限制")
+
+
+def test_short_answer_stays_in_medical_flow(monkeypatch):
+    monkeypatch.setenv("USE_MODEL", "1")
+
+    def boom(*args, **kwargs):
+        raise AssertionError("短回答不应走普通聊天路由")
+
+    monkeypatch.setattr("backend.app.agent.opening.route_reply", boom)
+    state = ConsultationState(
+        latest_user_message="无病史",
+        skill="pediatric_fever",
+        missing_fields=["持续时间"],
+    )
+
+    result = route_general(state)
+
+    assert result["next_action"] == "MEDICAL"

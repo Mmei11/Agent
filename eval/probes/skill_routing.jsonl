@@ -4,3 +4,17 @@
 {"id": "SR04", "split": "dev", "message": "孩子三岁，发烧三十八度五，精神还可以", "expected_skill": "pediatric_fever", "enabled": true, "note": "Phase D 启用"}
 {"id": "SR05", "split": "dev", "message": "宝宝一岁半，昨晚开始发热，有点咳嗽", "expected_skill": "pediatric_fever", "enabled": true, "note": "Phase D 启用"}
 {"id": "SR06", "split": "dev", "message": "小孩烧到三十九度，手脚凉", "expected_skill": "pediatric_fever", "enabled": true, "note": "Phase D 启用"}
+{"id": "SR07", "split": "dev", "message": "太阳穴跳痛，昨天开始的", "expected_skill": "headache", "enabled": true, "note": "头痛 dev"}
+{"id": "SR08", "split": "dev", "message": "后脑勺老是发紧，像被箍住", "expected_skill": "headache", "enabled": true, "note": "头痛 dev"}
+{"id": "SR09", "split": "dev", "message": "偏头痛又犯了，怕光", "expected_skill": "headache", "enabled": true, "note": "头痛 dev"}
+{"id": "SR10", "split": "dev", "message": "脑袋昏沉，转头有点晕", "expected_skill": "headache", "enabled": true, "note": "头痛 dev"}
+{"id": "SR11", "split": "holdout", "message": "前额胀痛，早上起来最明显", "expected_skill": "headache", "enabled": true, "note": "头痛 holdout"}
+{"id": "SR12", "split": "holdout", "message": "头晕得站不稳，没有发烧", "expected_skill": "headache", "enabled": true, "note": "头痛 holdout"}
+{"id": "SR13", "split": "holdout", "message": "一边头痛，伴着恶心", "expected_skill": "headache", "enabled": true, "note": "头痛 holdout"}
+{"id": "SR14", "split": "dev", "message": "两岁宝宝发烧到三十八度", "expected_skill": "pediatric_fever", "enabled": true, "note": "儿科 dev"}
+{"id": "SR15", "split": "dev", "message": "五岁孩子咳嗽发烧，精神一般", "expected_skill": "pediatric_fever", "enabled": true, "note": "儿科 dev"}
+{"id": "SR16", "split": "dev", "message": "新生儿体温三十七度八，要不要去医院", "expected_skill": "pediatric_fever", "enabled": true, "note": "儿科 dev"}
+{"id": "SR17", "split": "dev", "message": "宝宝十个月，烧了一天", "expected_skill": "pediatric_fever", "enabled": true, "note": "儿科 dev"}
+{"id": "SR18", "split": "holdout", "message": "一岁半的小孩发热，手脚冰凉", "expected_skill": "pediatric_fever", "enabled": true, "note": "儿科 holdout"}
+{"id": "SR19", "split": "holdout", "message": "三岁幼儿高烧不退", "expected_skill": "pediatric_fever", "enabled": true, "note": "儿科 holdout"}
+{"id": "SR20", "split": "holdout", "message": "儿童发烧两天，精神差", "expected_skill": "pediatric_fever", "enabled": true, "note": "儿科 holdout"}
