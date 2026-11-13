@@ -53,6 +53,9 @@ ALLOWED_NAMES = {
     # Phase 5 安全
     "SAFETY_POLICY_PATH",
     "AUDIT_LOG_PATH",
+    # Phase C：MCP 外部工具。默认关闭；白名单为空等于全部拒绝。
+    "MCP_ENABLED",
+    "MCP_SERVERS",
     # 本地轨迹
     "TRACE_SINK",
     "TRACE_PATH",

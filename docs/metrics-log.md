@@ -518,3 +518,13 @@
 - `state.tool_results` 保持原文，渲染、出处与错误分支不受影响；只有模型看到摘要
 - 用真实知识条目实测：department 1010 → 42 字（24x）、guideline 909 → 136 字（6.7x）、red_flag 975 → 42 字（23x）
 - 单测：539 passed + 6 skipped（新增 8 条摘要测试）
+
+**2026-11-13 · Phase C 第 5 课：MCP client（stdio）**
+
+- 新增 `backend/app/tools/mcp_client.py`：后台事件循环线程桥接 async MCP 会话，`ToolSpec.handler` 仍是同步契约
+- 配置：`MCP_ENABLED` 默认 0；`MCP_SERVERS` 是 JSON 数组，每个 server 必须显式列 `allowed_tools`，空列表等于全部拒绝
+- 发现与注册：`list_tools` → 按白名单生成 `ToolSpec`（`read_only` + `external` + 动态 Pydantic 参数模型），重名时保留内部工具
+- 运行时：调用失败/超时转成结构化 error；连续失败 3 次熔断 30s；某个 server 启动失败只跳过，不阻断主流程
+- `registry.call_tool` 改为统一走 `DEFAULT_CATALOG`，外部工具与内部工具同一条执行路径；`KNOWLEDGE_BACKEND=stub` 仍只替换知识类工具
+- 集成测试连项目自己的 MCP server（stdio 子进程 + stub 知识库），验证工具发现、白名单、真实调用往返与启动失败包装
+- 单测：555 passed + 6 skipped（新增 16 条 MCP client 测试）

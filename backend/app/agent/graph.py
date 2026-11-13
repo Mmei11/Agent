@@ -312,6 +312,12 @@ def build_graph(checkpointer=None):
     checkpointer=None 时无持久化（原有行为，不破坏测试）；
     传入 SqliteSaver 时启用会话持久化，按 thread_id 存储和恢复状态。
     """
+    # 外部 MCP 工具默认关闭；启用时在装配图之前注册进同一份目录。
+    # 放在这里而不是模块导入时，避免 import 就拉子进程。
+    from backend.app.tools.mcp_client import load_external_tools
+
+    load_external_tools()
+
     graph = StateGraph(ConsultationState)  # 用 ConsultationState 作为图的状态类型
 
     # 注册六个节点：埋点包在注册处，节点函数本身保持纯业务逻辑。
