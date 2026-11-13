@@ -21,7 +21,12 @@ from backend.app.agent.general import (
     is_red_flag_question,
 )
 from backend.app.agent.memory_ref import is_memory_reference
-from backend.app.agent.opening import answer_guideline, answer_red_flags, answer_research
+from backend.app.agent.opening import (
+    answer_clinical_trials,
+    answer_guideline,
+    answer_red_flags,
+    answer_research,
+)
 from backend.app.agent.router import route as route_reply
 from backend.app.agent.session_info import (
     build_answer as build_session_info_answer,
@@ -404,6 +409,11 @@ def answer_followup(state: ConsultationState) -> dict:
     # 红旗科普类追问：先于就医准备，允许列出危险信号但不给安抚结论。
     if not memory_reference and is_red_flag_question(state.latest_user_message):
         return answer_red_flags(state, node="answer")
+
+    # 临床试验追问：先于文献检索，避免“临床试验”被当成泛研究问题。
+    trial_reply = answer_clinical_trials(state, node="answer")
+    if trial_reply is not None:
+        return trial_reply
 
     # 文献检索追问：只有 PubMed 工具已注册时才接管。
     research_reply = answer_research(state, node="answer")

@@ -7,20 +7,27 @@ import pytest
 from backend.app.agent import opening
 from backend.app.agent.general import (
     external_answer_is_safe,
+    is_clinical_trial_question,
     is_drug_label_question,
+    is_recall_question,
     is_research_question,
 )
 from backend.app.agent.opening import (
     _english_drug_name,
     _research_query,
+    _trial_query,
+    answer_clinical_trials,
     answer_drug_label,
+    answer_recall,
     answer_research,
 )
 from backend.app.agent.state import ConsultationState
 from backend.app.tools.contract import ToolResult
 from backend.app.tools.external_summaries import (
     parse_openfda_label,
+    summarize_clinicaltrials_search,
     summarize_openfda_label,
+    summarize_openfda_recalls,
     summarize_pubmed_search,
 )
 
@@ -60,6 +67,37 @@ PUBMED_TEXT = """## PubMed Search Results
 **Source:** Infect Dis Now
 **Published:** 2025-09-01
 **DOI:** 10.1016/j.idnow.2025.105125
+"""
+
+RECALL_TEXT = """**31 total results** (returned: 2, skip: 0, limit: 2) | Data updated: 2026-11-04
+
+**Recall #D-0583-2018** — Class II
+Firm: Spirit Pharmaceuticals, LLC
+Product: Ibuprofen Tablets USP, 200 mg, 100-count bottles
+Reason: CGMP deviations: Ibuprofen is being recalled in response to previous recall
+Status: Terminated
+Recall initiation date: 20180110
+**Openfda:** generic_name=IBUPROFEN; product_ndc=68210-0800
+
+---
+
+**Recall #D-1055-2017** — Class II
+Product: Ibuprofen Tablets, USP 600 mg, 500-count bottle
+Reason: Failed dissolution specification
+Status: Completed
+Recall initiation date: 20170120
+"""
+
+TRIAL_TEXT = """Found 3 studies (443 total matching)
+- **NCT02205112**: A Phase III Study to Evaluate the Efficacy and Safety of Intravenous Infusion of Nemonoxacin in Treating CAP [COMPLETED]
+  PHASE3 | N=598 | TaiGen Biotechnology Co., Ltd. | Community-acquired Pneumonia | no results | start 2014-06
+  Site: Baotou Central Hospital, Baotou, China (1 of 63 sites)
+- **NCT06782607**: Clinical Impact of a Multiplex Rapid Diagnostic Pneumonia Panel Testing [NOT_YET_RECRUITING]
+  NA | N=80 | Mahidol University | Infectious Disease of Lung | no results | start 2025-02-01
+  Site: Siriraj Hospital, Bangkok, Thailand
+- **NCT06170372**: High-dose Inhalations of Nitric Oxide in the Treatment of Pneumonia [ACTIVE_NOT_RECRUITING]
+  NA | N=200 | Tomsk National Research Medical Center | Nosocomial Pneumonia | no results | start 2024-01-15
+  Site: Cardiology Research Institute, Tomsk, Russia
 """
 
 
@@ -177,3 +215,86 @@ def test_external_paths_disabled_return_none(monkeypatch):
 )
 def test_external_answer_gate_rejects_unsafe_text(text):
     assert not external_answer_is_safe(text)
+
+
+def test_recall_and_trial_question_detection():
+    assert is_recall_question("布洛芬有没有召回？")
+    assert is_clinical_trial_question("有没有相关临床试验？")
+    assert not is_recall_question("头痛两天了")
+    assert not is_clinical_trial_question("我需要挂什么科？")
+
+
+def test_recall_summary_keeps_ids():
+    summary = summarize_openfda_recalls({"text": RECALL_TEXT})
+
+    assert "共 31 条" in summary
+    assert "D-0583-2018" in summary
+
+
+def test_trial_summary_keeps_nct_ids():
+    summary = summarize_clinicaltrials_search({"text": TRIAL_TEXT})
+
+    assert "共 443 条" in summary
+    assert "NCT02205112" in summary
+
+
+def test_trial_query_strips_chinese_framing():
+    assert (
+        _trial_query("有没有关于 community acquired pneumonia 的临床试验？")
+        == "community acquired pneumonia"
+    )
+
+
+def test_answer_recall_formats_and_strips_dosage(monkeypatch):
+    monkeypatch.setattr(opening, "DEFAULT_CATALOG", _registered())
+    monkeypatch.setattr(
+        opening,
+        "call_tool",
+        lambda name, params: ToolResult(
+            ok=True, name=name, data={"text": RECALL_TEXT}, latency_ms=5
+        ),
+    )
+
+    result = answer_recall(_state("布洛芬有没有召回？"))
+
+    text = result["rendered_text"]
+    assert "D-0583-2018" in text
+    assert "Class II" in text
+    assert "CGMP deviations" in text
+    assert "2018-01-10" in text
+    assert "200 mg" not in text
+    assert "来源：openFDA" in text
+    assert result["trace"][1]["called"] == "openfda_search_recalls"
+
+
+def test_answer_clinical_trials_formats(monkeypatch):
+    monkeypatch.setattr(opening, "DEFAULT_CATALOG", _registered())
+    monkeypatch.setattr(
+        opening,
+        "call_tool",
+        lambda name, params: ToolResult(
+            ok=True, name=name, data={"text": TRIAL_TEXT}, latency_ms=5
+        ),
+    )
+
+    result = answer_clinical_trials(_state("有没有关于肺炎的临床试验？"))
+
+    text = result["rendered_text"]
+    assert "NCT02205112" in text
+    assert "COMPLETED" in text
+    assert "共 443 条" in text
+    assert "来源：ClinicalTrials.gov" in text
+    assert result["trace"][0]["clinicaltrials"] is True
+
+
+def test_recall_and_trial_paths_disabled_return_none(monkeypatch):
+    monkeypatch.setattr(opening, "DEFAULT_CATALOG", SimpleNamespace(get=lambda name: None))
+
+    assert answer_recall(_state("布洛芬有没有召回？")) is None
+    assert answer_clinical_trials(_state("有没有相关临床试验？")) is None
+
+
+def test_gate_accepts_clinicaltrials_source():
+    assert external_answer_is_safe(
+        "来源：ClinicalTrials.gov。试验信息不代表适合你。"
+    )

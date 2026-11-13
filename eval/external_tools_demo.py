@@ -18,6 +18,8 @@ from backend.app.tools.mcp_client import (  # noqa: E402
 
 QUESTIONS = (
     "布洛芬的说明书里有什么警示？",
+    "布洛芬有没有召回？",
+    "有没有关于 community acquired pneumonia 的临床试验？",
     "PubMed 上关于 community acquired pneumonia 的研究",
 )
 

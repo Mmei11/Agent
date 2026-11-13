@@ -13,8 +13,10 @@ from backend.app.agent.general import (
     RED_FLAG_FALLBACK,
     external_answer_is_safe,
     general_answer_is_safe,
+    is_clinical_trial_question,
     is_drug_label_question,
     is_guideline_question,
+    is_recall_question,
     is_red_flag_question,
     is_research_question,
     red_flag_answer_is_safe,
@@ -309,6 +311,213 @@ def answer_drug_label(state: ConsultationState, *, node: str = "general_route") 
     )
 
 
+def _clip_plain(text: str, limit: int) -> str:
+    text = " ".join(str(text).split())
+    return text if len(text) <= limit else text[: limit - 1].rstrip() + "…"
+
+
+_DOSE_IN_TEXT = re.compile(
+    r"\b\d+(?:\.\d+)?\s*(?:mg|ml|g|mcg|tablet|tablets|capsule|capsules|dose|doses)\b",
+    re.IGNORECASE,
+)
+
+
+def _strip_dose(text: str) -> str:
+    """召回描述里常有规格，对外文案不带剂量。"""
+    cleaned = _DOSE_IN_TEXT.sub("", str(text))
+    cleaned = re.sub(r"\s+", " ", cleaned)
+    cleaned = re.sub(r",\s*,", ",", cleaned)
+    return cleaned.strip(" ,;")
+
+
+def _recall_entries(text: str) -> list[dict]:
+    entries = []
+    for block in re.split(r"^\s*---\s*$", text, flags=re.MULTILINE):
+        head = re.search(r"\*\*Recall #(.+?)\*\*\s*—\s*Class (\w+)", block)
+        if not head:
+            continue
+
+        def field(name: str) -> str:
+            match = re.search(rf"^{name}:\s*(.+)$", block, flags=re.MULTILINE)
+            return match.group(1).strip() if match else ""
+
+        entries.append(
+            {
+                "number": head.group(1).strip(),
+                "klass": head.group(2),
+                "product": field("Product"),
+                "reason": field("Reason"),
+                "status": field("Status"),
+                "date": field("Recall initiation date") or field("Report date"),
+            }
+        )
+    return entries
+
+
+def _format_date(value: str) -> str:
+    if re.fullmatch(r"\d{8}", value):
+        return f"{value[:4]}-{value[4:6]}-{value[6:]}"
+    return value
+
+
+def answer_recall(state: ConsultationState, *, node: str = "general_route") -> dict | None:
+    """openFDA 召回记录：只列召回号、原因、状态与日期。"""
+    if not is_recall_question(state.latest_user_message):
+        return None
+    tool_name = "openfda_search_recalls"
+    if DEFAULT_CATALOG.get(tool_name) is None:
+        return None
+
+    drug = _english_drug_name(state.latest_user_message)
+    if not drug:
+        return None
+
+    outcome = call_tool(
+        tool_name,
+        {
+            "category": "drug",
+            "search": f'openfda.generic_name:"{drug}"',
+            "limit": 3,
+        },
+    )
+    payload = markdown_text((outcome.data or {}) if outcome.ok else "")
+    entries = _recall_entries(payload)
+
+    if entries:
+        total = re.search(r"\*\*(\d+) total results\*\*", payload)
+        lines = [
+            f"FDA 召回记录（共 {total.group(1)} 条）："
+            if total
+            else "FDA 召回记录："
+        ]
+        for index, entry in enumerate(entries[:3], start=1):
+            parts = [f"{entry['number']}（Class {entry['klass']}）"]
+            product = _clip_plain(_strip_dose(entry["product"]), 60)
+            reason = _clip_plain(_strip_dose(entry["reason"]), 70)
+            if product:
+                parts.append(product)
+            if reason:
+                parts.append(f"原因：{reason}")
+            if entry["status"]:
+                parts.append(f"状态：{entry['status']}")
+            if entry["date"]:
+                parts.append(f"发起：{_format_date(entry['date'])}")
+            lines.append(f"{index}. " + "；".join(parts))
+        lines.append(
+            "来源：openFDA 执法报告。召回信息不代表该药当前仍在售或仍被召回，请以官方公告为准。"
+        )
+        text = "\n".join(lines)
+    else:
+        text = f"没有查到 {drug} 的 FDA 召回记录（来源：openFDA）。"
+
+    if not external_answer_is_safe(text):
+        text = "外部药品召回信息暂无法安全展示；请以官方公告为准。"
+
+    return _external_reply(
+        state,
+        node=node,
+        tool_name=tool_name,
+        text=text,
+        outcome=outcome,
+        args_keys=["category", "search", "limit"],
+        trace_extra={"openfda_recalls": True, "hits": len(entries)},
+    )
+
+
+def _trial_query(message: str) -> str:
+    text = re.sub(
+        r"(帮我|请|查一下|搜一下|找一下|检索|有没有|有哪些|有什么|相关|关于|"
+        r"临床试验|临床研究|研究招募|受试者招募|入组|clinical\s*trials?|上|的)",
+        " ",
+        message,
+        flags=re.IGNORECASE,
+    )
+    text = re.sub(r"[？?。！!，,]", " ", text)
+    return " ".join(text.split()) or message.strip()
+
+
+def _trial_entries(text: str) -> list[dict]:
+    lines = text.splitlines()
+    entries = []
+    for index, line in enumerate(lines):
+        match = re.match(
+            r"^- \*\*(NCT\d+)\*\*: (.+?) \[([A-Z_]+)\]", line
+        )
+        if not match:
+            continue
+        detail = (
+            lines[index + 1].strip()
+            if index + 1 < len(lines) and lines[index + 1].startswith("  ")
+            else ""
+        )
+        entries.append(
+            {
+                "nct": match.group(1),
+                "title": match.group(2),
+                "status": match.group(3),
+                "phase": detail.split("|")[0].strip() if detail else "",
+                "enrollment": re.search(r"\bN=(\d+)\b", detail),
+            }
+        )
+    return entries
+
+
+def answer_clinical_trials(
+    state: ConsultationState, *, node: str = "general_route"
+) -> dict | None:
+    """ClinicalTrials.gov 检索：只返回 NCT 编号、标题与状态，不判断是否适合。"""
+    if not is_clinical_trial_question(state.latest_user_message):
+        return None
+    tool_name = "clinicaltrials_search_studies"
+    if DEFAULT_CATALOG.get(tool_name) is None:
+        return None
+
+    query = _trial_query(state.latest_user_message)
+    outcome = call_tool(tool_name, {"query": query, "pageSize": 3})
+    payload = markdown_text((outcome.data or {}) if outcome.ok else "")
+    entries = _trial_entries(payload)
+
+    if entries:
+        found = re.search(r"Found (\d+) studies \((\d+) total matching\)", payload)
+        lines = [
+            f"ClinicalTrials.gov 检索（共 {found.group(2) if found else '?'} 条，"
+            f"返回 {found.group(1) if found else len(entries)} 条）："
+        ]
+        for index, entry in enumerate(entries[:3], start=1):
+            bits = [entry["status"]]
+            if entry["phase"]:
+                bits.append(entry["phase"])
+            if entry["enrollment"]:
+                bits.append(f"N={entry['enrollment'].group(1)}")
+            line = (
+                f"{index}. {entry['nct']} — {_clip_plain(entry['title'], 70)}"
+                f"（{'；'.join(bits)}）"
+            )
+            lines.append(line)
+        lines.append(
+            "来源：ClinicalTrials.gov。试验信息不代表适合你，是否入组需由研究方评估。"
+        )
+        text = "\n".join(lines)
+    else:
+        text = (
+            f"没有查到相关临床试验（ClinicalTrials.gov）：{query}。"
+            "建议换英文关键词再试。"
+        )
+
+    if not external_answer_is_safe(text):
+        text = "外部临床试验信息暂无法安全展示；建议直接访问 ClinicalTrials.gov 查询。"
+
+    return _external_reply(
+        state,
+        node=node,
+        tool_name=tool_name,
+        text=text,
+        outcome=outcome,
+        args_keys=["query", "pageSize"],
+        trace_extra={"clinicaltrials": True, "hits": len(entries)},
+    )
+
+
 def _research_query(message: str) -> str:
     text = re.sub(
         r"(帮我|请|查一下|搜一下|找一下|检索|pubmed|关于|有没有|有哪些|有什么|"
@@ -417,6 +626,12 @@ def route_general(state: ConsultationState) -> dict:
     drug_reply = answer_drug_label(state, node="general_route")
     if drug_reply is not None:
         return drug_reply
+    recall_reply = answer_recall(state, node="general_route")
+    if recall_reply is not None:
+        return recall_reply
+    trial_reply = answer_clinical_trials(state, node="general_route")
+    if trial_reply is not None:
+        return trial_reply
     research_reply = answer_research(state, node="general_route")
     if research_reply is not None:
         return research_reply

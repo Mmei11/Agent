@@ -106,6 +106,13 @@ RESEARCH_PATTERNS = (
     ),
 )
 
+CLINICAL_TRIAL_PATTERNS = (
+    re.compile(r"(临床试验|临床研究|研究招募|受试者招募|入组)"),
+    re.compile(r"\bclinical\s*trials?\b", re.IGNORECASE),
+)
+
+RECALL_PATTERNS = (re.compile(r"(召回|下架|批次问题|批次不合格|召回事件)"),)
+
 # 外部文案的安全闸门：比普通回答多挡一层英文剂量表达。
 EXTERNAL_DOSAGE_PATTERNS = (
     re.compile(
@@ -130,6 +137,20 @@ def is_research_question(message: str) -> bool:
     return bool(text) and any(pattern.search(text) for pattern in RESEARCH_PATTERNS)
 
 
+def is_clinical_trial_question(message: str) -> bool:
+    """是否在问临床试验/招募，而不是普通治疗问题。"""
+    text = (message or "").strip()
+    return bool(text) and any(
+        pattern.search(text) for pattern in CLINICAL_TRIAL_PATTERNS
+    )
+
+
+def is_recall_question(message: str) -> bool:
+    """是否在问药品召回；具体药名由调用方再判断。"""
+    text = (message or "").strip()
+    return bool(text) and any(pattern.search(text) for pattern in RECALL_PATTERNS)
+
+
 def external_answer_is_safe(text: str) -> bool:
     """外部结果的组织文案：必须带来源、不得出现剂量或处方建议。"""
     text = text.strip()
@@ -139,7 +160,7 @@ def external_answer_is_safe(text: str) -> bool:
         return False
     if any(pattern.search(text) for pattern in EXTERNAL_DOSAGE_PATTERNS):
         return False
-    return "openFDA" in text or "PubMed" in text
+    return any(marker in text for marker in ("openFDA", "PubMed", "ClinicalTrials"))
 
 
 def display_now() -> datetime:

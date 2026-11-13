@@ -137,7 +137,42 @@ def summarize_openfda_label(data) -> str:
 
 def summarize_openfda_recalls(data) -> str:
     text = markdown_text(data)
-    return clip_summary(_clean(text) or "FDA 召回：未返回内容。")
+    total = re.search(r"\*\*(\d+) total results\*\*", text)
+    recalls = re.findall(
+        r"\*\*Recall #(.+?)\*\*\s*—\s*Class (\w+)", text
+    )
+    products = re.findall(r"^Product:\s*(.+)$", text, re.MULTILINE)
+
+    if not recalls:
+        return clip_summary(_clean(text) or "FDA 召回：未返回内容。")
+
+    parts = [f"FDA召回：共 {total.group(1) if total else '?'} 条"]
+    for index, (number, klass) in enumerate(recalls[:3]):
+        product = products[index] if index < len(products) else ""
+        detail = f"{number}（Class {klass}）"
+        if product:
+            detail += f" {product[:50]}"
+        parts.append(detail)
+    return clip_summary("；".join(parts))
+
+
+def summarize_clinicaltrials_search(data) -> str:
+    text = markdown_text(data)
+    found = re.search(r"Found (\d+) studies \((\d+) total matching\)", text)
+    studies = re.findall(
+        r"^- \*\*(NCT\d+)\*\*: (.+?) \[([A-Z_]+)\]", text, re.MULTILINE
+    )
+
+    if not found and not studies:
+        return clip_summary(_clean(text) or "ClinicalTrials：未返回内容。")
+
+    parts = [
+        f"临床试验：共 {found.group(2) if found else '?'} 条，"
+        f"返回 {found.group(1) if found else len(studies)} 条"
+    ]
+    for nct, title, status in studies[:3]:
+        parts.append(f"{nct} {title[:60]}（{status}）")
+    return clip_summary("；".join(parts))
 
 
 def summarize_pubmed_search(data) -> str:
@@ -170,6 +205,7 @@ def summarize_pubmed_fetch(data) -> str:
 SUMMARIZERS = {
     "openfda_get_drug_label": summarize_openfda_label,
     "openfda_search_recalls": summarize_openfda_recalls,
+    "clinicaltrials_search_studies": summarize_clinicaltrials_search,
     "pubmed_search_articles": summarize_pubmed_search,
     "pubmed_fetch_articles": summarize_pubmed_fetch,
 }
