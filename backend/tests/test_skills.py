@@ -1,9 +1,13 @@
 """Phase D：技能包、注册表与规则路由。"""
 
 import pytest
+import yaml
 
+from backend.app.agent.decision import Decision, validate_decision
+from backend.app.agent.decision_llm import build_context
 from backend.app.agent.followup import followup
 from backend.app.agent.intake import extract_facts
+from backend.app.agent.result import build_completed_result
 from backend.app.agent.skill_route import skill_route
 from backend.app.agent.state import ConsultationState
 from backend.app.skills import registry
@@ -11,6 +15,7 @@ from backend.app.skills.registry import (
     DEFAULT_NAME,
     list_skill_summaries,
     load_skill,
+    repo_root,
     reset_skills_cache,
 )
 from backend.app.skills.router import route
@@ -178,3 +183,83 @@ def test_disabled_skills_graph_uses_default(monkeypatch):
     result = app.invoke({"latest_user_message": "孩子三岁，发烧三十八度五"})
 
     assert result["skill"] == DEFAULT_NAME
+
+
+def _install_limited_skill(tmp_path, monkeypatch, tools):
+    payload = yaml.safe_load(
+        (repo_root() / "skills/default/manifest.yaml").read_text(encoding="utf-8")
+    )
+    payload.update(
+        {
+            "name": "limited",
+            "title": "限制工具",
+            "description": "测试工具白名单",
+            "priority": 5,
+            "when_to_use": ["限制"],
+            "tools": tools,
+        }
+    )
+    skill_dir = tmp_path / "limited"
+    skill_dir.mkdir()
+    (skill_dir / "manifest.yaml").write_text(
+        yaml.safe_dump(payload, allow_unicode=True), encoding="utf-8"
+    )
+    (skill_dir / "SKILL.md").write_text("# 限制工具\n", encoding="utf-8")
+    monkeypatch.setenv("SKILLS_DIR", str(tmp_path))
+    reset_skills_cache()
+
+
+def test_decision_prompt_only_lists_skill_tools(tmp_path, monkeypatch):
+    _install_limited_skill(tmp_path, monkeypatch, ["guideline_retrieve"])
+    state = ConsultationState(
+        skill="limited", collected_facts={"主要症状": ["头痛"]}, missing_fields=[]
+    )
+
+    context = build_context(state, max_followups=3)
+
+    assert [entry["name"] for entry in context["tools"]] == ["guideline_retrieve"]
+
+
+def test_decision_rejects_tool_outside_whitelist(tmp_path, monkeypatch):
+    _install_limited_skill(tmp_path, monkeypatch, ["guideline_retrieve"])
+    state = ConsultationState(
+        skill="limited",
+        collected_facts={"主要症状": ["头痛"]},
+        missing_fields=[],
+        followup_count=0,
+    )
+    decision = Decision(
+        action="CALL_TOOL",
+        reason="测试",
+        confidence=0.9,
+        tool_name="department_route",
+        tool_args={},
+    )
+
+    final = validate_decision(decision, state, max_followups=3)
+
+    assert final.tool_name == "guideline_retrieve"
+
+
+def test_skill_output_template_is_used():
+    skill = load_skill("pediatric_fever")
+
+    result = build_completed_result(
+        collected_facts={"年龄": ["三岁"]},
+        missing_fields=[],
+        tool_results={"department_route": {"department": "儿科"}},
+        output_template=skill.manifest.output_template,
+    )
+
+    assert result["next_step"].startswith("建议就诊方向：儿科")
+    assert "体温记录" in result["next_step"]
+
+
+def test_default_output_template_stays_unchanged():
+    result = build_completed_result(
+        collected_facts={},
+        missing_fields=[],
+        tool_results={"department_route": {"department": "神经内科"}},
+    )
+
+    assert result["next_step"] == "建议就诊方向：神经内科"

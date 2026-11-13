@@ -23,13 +23,19 @@ class ConsultationResult(BaseModel):
     limitations: str = "本系统不提供确诊、处方或用药建议，请咨询专业人员。"  # 固定限制说明
 
 
-def build_completed_result(collected_facts: dict, missing_fields: list, tool_results: dict) -> dict:
+def build_completed_result(
+    collected_facts: dict,
+    missing_fields: list,
+    tool_results: dict,
+    output_template: str = "",
+) -> dict:
     """正常完成：信息收集完，调了工具，输出科室方向。
 
     参数：
         collected_facts：intake 提取的已知字段
         missing_fields：仍然缺失的字段名
         tool_results：工具调用的结果字典
+        output_template：技能自定义的下一步模板，支持 {department}
     返回：结构化结果字典
     """
     tools_used = list(tool_results.keys())  # 取所有调过的工具名
@@ -37,7 +43,12 @@ def build_completed_result(collected_facts: dict, missing_fields: list, tool_res
     dept = dept_result.get("department")  # 从结果里取科室名
 
     if dept:  # 有匹配的科室
-        next_step = f"建议就诊方向：{dept}"
+        template = (output_template or "建议就诊方向：{department}").strip()
+        try:
+            next_step = template.format(department=dept)
+        except (KeyError, IndexError, ValueError):
+            # 模板写坏了不能挡住结果，退回默认文案。
+            next_step = f"建议就诊方向：{dept}"
     else:  # 无匹配，不编造
         next_step = "暂无法判断科室方向，建议结合实际情况就诊"
 

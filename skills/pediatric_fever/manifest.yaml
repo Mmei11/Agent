@@ -59,3 +59,4 @@ tools:
   - guideline_retrieve
 output_template: |
   建议就诊方向：{department}
+  就诊时带上：体温记录、发热天数、用药清单。

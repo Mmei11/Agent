@@ -1,6 +1,6 @@
 """Phase D：技能层。"""
 
-from backend.app.skills.context import skill_for
+from backend.app.skills.context import allowed_tools, skill_for
 from backend.app.skills.registry import (
     DEFAULT_NAME,
     Skill,
@@ -13,6 +13,7 @@ from backend.app.skills.registry import (
 from backend.app.skills.router import route
 
 __all__ = [
+    "allowed_tools",
     "DEFAULT_NAME",
     "Skill",
     "SkillSummary",

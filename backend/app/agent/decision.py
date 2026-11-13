@@ -7,7 +7,7 @@ from pydantic import ValidationError
 
 from backend.app.agent.followup import select_next_field
 from backend.app.agent.state import ConsultationState
-from backend.app.skills.context import skill_for
+from backend.app.skills.context import allowed_tools, skill_for
 from backend.app.tools.catalog import DEFAULT_CATALOG, ToolCatalog
 from backend.app.tools.contract import ToolSpec
 
@@ -57,11 +57,18 @@ def query_from_facts(collected_facts: dict) -> str:
 
 
 def _default_tool(state: ConsultationState, catalog: ToolCatalog) -> ToolSpec | None:
-    """按目录顺序找第一个还没调用过的只读工具。"""
+    """按目录顺序找当前技能允许、且还没调用过的只读工具。"""
+    allowed = allowed_tools(state)
     for spec in catalog.auto_callable():
-        if spec.name not in state.tool_results:
+        if spec.name in allowed and spec.name not in state.tool_results:
             return spec
     return None
+
+
+def _tool_called(state: ConsultationState) -> bool:
+    """当前技能允许的工具里，是否至少调用过一个。"""
+    allowed = allowed_tools(state)
+    return any(name in allowed for name in state.tool_results)
 
 
 def _resolve_tool(
@@ -75,7 +82,12 @@ def _resolve_tool(
         return None if state.tool_results else _default_tool(state, catalog)
 
     spec = catalog.get(name)
-    if spec and spec.auto_callable and name not in state.tool_results:
+    if (
+        spec
+        and spec.auto_callable
+        and name in allowed_tools(state)
+        and name not in state.tool_results
+    ):
         return spec
 
     # 名字非法或已调用过：只在还没调用过任何工具时回退到默认工具。
@@ -121,7 +133,7 @@ def rule_action(state: ConsultationState, max_followups: int) -> str:
     """确定性规则：没问够就问，没调工具就调，否则结束。"""
     under_limit = state.followup_count < max_followups
     can_ask = _can_ask(state)
-    tool_called = "department_route" in state.tool_results
+    tool_called = _tool_called(state)
 
     if under_limit and can_ask:
         return "ASK_FOLLOWUP"
@@ -206,7 +218,7 @@ def validate_action(model_choice: str, state: ConsultationState, max_followups: 
     """
     under_limit = state.followup_count < max_followups
     can_ask = _can_ask(state)
-    tool_called = "department_route" in state.tool_results
+    tool_called = _tool_called(state)
 
     if model_choice == "ASK_FOLLOWUP":
         if user_declined_followup(state.latest_user_message):

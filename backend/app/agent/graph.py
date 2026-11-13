@@ -32,6 +32,7 @@ from backend.app.safety.audit import AuditEvent, input_digest, write as write_au
 from backend.app.safety.output_rail import check as check_output
 from backend.app.safety.policy import decide as decide_policy
 from backend.app.safety.rule_engine import final_check  # 最终输出检查
+from backend.app.skills.context import skill_for
 from backend.app.tools.catalog import DEFAULT_CATALOG
 from backend.app.tools.knowledge_tools import DEPARTMENT_ROUTE
 from backend.app.tools.registry import call_tool as _live_call_tool
@@ -266,7 +267,10 @@ def output(state: ConsultationState) -> dict:
             structured = build_error_result(error["error"])
     else:  # 正常路径 → 已知、未知、工具、下一步
         structured = build_completed_result(
-            state.collected_facts, state.missing_fields, state.tool_results
+            state.collected_facts,
+            state.missing_fields,
+            state.tool_results,
+            output_template=skill_for(state).manifest.output_template,
         )
 
     # 渲染文案（不含 limitations，先检查核心内容）

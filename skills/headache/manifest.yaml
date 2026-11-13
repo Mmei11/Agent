@@ -49,3 +49,4 @@ tools:
   - guideline_retrieve
 output_template: |
   建议就诊方向：{department}
+  就诊时可带上头痛记录：发作时间、持续时长、伴随症状。

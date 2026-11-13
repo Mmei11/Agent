@@ -581,3 +581,12 @@
 - 实测：`孩子三岁，发烧三十八度五，精神还可以` → `pediatric_fever`，缺持续时间/伴随表现，追问“发热持续多久了？”
 - Dockerfile 增加 `COPY skills ./skills`，否则容器里只加载 default
 - M9 1.000；单测 **645 passed**
+
+**2026-11-13 · Phase D 第 3 课：技能输出模板与工具白名单**
+
+- `build_completed_result` 支持 `output_template`：技能可自定义 next_step，仍以 `{department}` 为主占位符；模板写坏自动退回默认文案
+- headache 输出附“头痛记录”提示，pediatric_fever 输出附“体温记录/发热天数/用药清单”
+- decision 的 tools 清单只列当前技能 manifest 白名单内的内部工具；未知/越权工具回退到白名单默认工具
+- `_default_tool`、`_resolve_tool`、`rule_decision` 都按技能白名单选择；decision prompt 升到 v6
+- 测试覆盖：受限技能只能看到 `guideline_retrieve`，模型选 `department_route` 会被替换；default 输出文案不变
+- 单测 **649 passed**

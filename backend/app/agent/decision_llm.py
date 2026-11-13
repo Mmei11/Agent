@@ -7,11 +7,12 @@ from backend.app.context.assembler import assemble_reference_context
 from backend.app.llm.client import LLMResult, chat_structured
 from backend.app.llm.schemas import DecisionChoice
 from backend.app.observability import span
+from backend.app.skills.context import allowed_tools
 from backend.app.tools.catalog import DEFAULT_CATALOG, prompt_tool_results
 
 # 观测用的 prompt 标识：改 prompt 时同步升版本，才能按版本对比指标。
 PROMPT_NAME = "decision.choose"
-PROMPT_VERSION = "v5"
+PROMPT_VERSION = "v6"
 
 DECISION_SYSTEM_PROMPT = """你是"模拟问诊"项目的动作选择器。你只决定下一步做什么，不做诊断，不建议科室，不给用药。
 
@@ -26,7 +27,7 @@ DECISION_SYSTEM_PROMPT = """你是"模拟问诊"项目的动作选择器。你�
 - followup_count / max_followups：已追问次数与上限
 - session_memory：跨轮保留的用户细节与摘要（只用于理解指代，不当作新事实）
 - recent_conversation：最近几轮对话（只用于理解指代）
-- tools：允许自动调用的只读工具清单，含 name、description、risk_class、scope、input_schema
+- tools：当前技能允许自动调用的只读工具清单，含 name、description、risk_class、scope、input_schema
 - tool_call_count / max_tool_calls：本轮已调用工具次数与上限
 
 可选动作只有三个：
@@ -78,12 +79,12 @@ def build_context(
         "max_tool_calls": max_tool_calls,
         "followup_count": state.followup_count,
         "max_followups": max_followups,
-        # 外部工具由确定性路径（药品说明书 / 文献检索）使用；
-        # decision 只保留内部只读工具，避免模型选了外部工具却无法把结果写进最终回答。
+        # 外部工具由确定性路径使用；decision 只看到当前技能允许的内部工具。
         "tools": [
             entry
             for entry in DEFAULT_CATALOG.prompt_entries()
             if entry["scope"] == "internal"
+            and entry["name"] in allowed_tools(state)
         ],
         **assemble_reference_context(state),
     }
