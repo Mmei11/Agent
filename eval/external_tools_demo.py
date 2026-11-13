@@ -19,8 +19,14 @@ from backend.app.tools.mcp_client import (  # noqa: E402
 QUESTIONS = (
     "布洛芬的说明书里有什么警示？",
     "布洛芬有没有召回？",
+    "卡铂短缺吗？",
+    "布洛芬 FDA 批准了吗？",
+    "布洛芬有什么不良反应？",
     "有没有关于 community acquired pneumonia 的临床试验？",
+    "NCT02205112 的详情",
     "PubMed 上关于 community acquired pneumonia 的研究",
+    "PMID 40679934 的摘要",
+    "高血压是什么病？",
 )
 
 

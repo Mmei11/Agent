@@ -7,27 +7,43 @@ import pytest
 from backend.app.agent import opening
 from backend.app.agent.general import (
     external_answer_is_safe,
+    is_adverse_event_question,
+    is_approval_question,
     is_clinical_trial_question,
     is_drug_label_question,
+    is_health_topic_question,
     is_recall_question,
     is_research_question,
+    is_shortage_question,
+    translated_external_is_safe,
 )
 from backend.app.agent.opening import (
     _english_drug_name,
+    _fetch_medlineplus_text,
+    _health_topic_query,
     _research_query,
     _trial_query,
+    answer_adverse_events,
+    answer_approval,
     answer_clinical_trials,
     answer_drug_label,
+    answer_health_topic,
     answer_recall,
     answer_research,
+    answer_shortage,
 )
 from backend.app.agent.state import ConsultationState
+from backend.app.llm.client import LLMResult
 from backend.app.tools.contract import ToolResult
 from backend.app.tools.external_summaries import (
     parse_openfda_label,
     summarize_clinicaltrials_search,
+    summarize_medlineplus_search,
+    summarize_openfda_adverse_events,
+    summarize_openfda_approvals,
     summarize_openfda_label,
     summarize_openfda_recalls,
+    summarize_openfda_shortages,
     summarize_pubmed_search,
 )
 
@@ -100,6 +116,65 @@ TRIAL_TEXT = """Found 3 studies (443 total matching)
   Site: Cardiology Research Institute, Tomsk, Russia
 """
 
+SHORTAGE_TEXT = """**35 total results** (returned: 1, skip: 0, limit: 1) | Data updated: 2026-11-13
+
+### Carboplatin Injection
+**Status:** Current
+**Availability:** Limited Availability
+**Therapeutic category:** Oncology
+**Dosage form:** Injection
+**Manufacturer:** Gland Pharma Limited
+**Timeline:** first posted 04/28/2023 | updated 10/21/2026
+"""
+
+APPROVAL_TEXT = """**208 total results** (returned: 1, skip: 0, limit: 1) | Data updated: 2026-11-12
+
+### IBUPROFEN
+**Application:** ANDA071265 | **Sponsor:** CONTRACT PHARMACAL
+**Brand:** IBUPROFEN | **Generic:** IBUPROFEN
+**Products:**
+- IBUPROFEN | (IBUPROFEN 200MG) | TABLET | ORAL | Discontinued
+"""
+
+AE_TEXT = """**221642 total results** (returned: 1, skip: 0, limit: 1) | Data updated: 2026-10-28
+
+### safetyreportid: 10003301
+**Patient:** reaction=[{"reactionmeddrapt":"Dyspepsia"},{"reactionmeddrapt":"Renal impairment"}]; drug=[{"medicinalproduct":"IBUPROFEN"}]
+**Serious:** 1
+**Receiptdate:** 20140228
+"""
+
+MEDLINE_DATA = {
+    "total": 97,
+    "returned": 1,
+    "results": [
+        {
+            "title": '<span class="qt0"><span class="qt1">High Blood Pressure</span></span>',
+            "snippet": "What is blood pressure? Blood pressure is the force of your blood.",
+            "url": "https://medlineplus.gov/highbloodpressure.html",
+        }
+    ],
+}
+
+TRIAL_RECORD_TEXT = """# Study NCT02205112: A Phase III Study to Evaluate the Efficacy and Safety of Intravenous Infusion of Nemonoxacin in Treating CAP
+**Status:** COMPLETED | INTERVENTIONAL | PHASE3 | N=598 (ACTUAL)
+**Sponsor:** TaiGen Biotechnology Co., Ltd. (INDUSTRY)
+**Conditions:** Community-acquired Pneumonia
+**Dates:** Start: 2014-06 | Primary Completion: 2017-05-04 (ACTUAL) | Completion: 2017-05-15 (ACTUAL)
+"""
+
+PUBMED_ARTICLE_TEXT = """## PubMed Articles
+**Articles Returned:** 1
+
+### Diagnosis and Management of Community-acquired Pneumonia: An Official American Thoracic Society Clinical Practice Guideline.
+**Journal:** American journal of respiratory and critical care medicine, 2026 Jan 1
+**PMID:** 40679934
+**DOI:** 10.1164/rccm.202507-1692ST
+
+#### Abstract
+BACKGROUND: Understanding of the diagnosis and treatment of adults with community-acquired pneumonia has evolved.
+"""
+
 
 def _registered():
     return SimpleNamespace(get=lambda name: object())
@@ -113,6 +188,9 @@ def test_drug_label_question_detection():
     assert is_drug_label_question("布洛芬的说明书里有什么警示？")
     assert is_drug_label_question("查一下 openFDA 上布洛芬的禁忌")
     assert not is_drug_label_question("头痛两天了")
+    # 批准与不良反应有各自更具体的路径，不能被说明书截走
+    assert not is_drug_label_question("布洛芬 FDA 批准了吗？")
+    assert not is_drug_label_question("布洛芬有什么不良反应？")
 
 
 def test_research_question_detection():
@@ -298,3 +376,227 @@ def test_gate_accepts_clinicaltrials_source():
     assert external_answer_is_safe(
         "来源：ClinicalTrials.gov。试验信息不代表适合你。"
     )
+
+
+def test_new_external_question_detection():
+    assert is_shortage_question("布洛芬短缺吗？")
+    assert is_approval_question("布洛芬 FDA 批准了吗？")
+    assert is_adverse_event_question("布洛芬有什么不良反应？")
+    assert is_health_topic_question("高血压是什么病？")
+    assert is_clinical_trial_question("NCT02205112 的详情")
+    assert is_research_question("PMID 40679934 的摘要")
+
+
+def test_new_external_summaries():
+    assert "共 35 条" in summarize_openfda_shortages({"text": SHORTAGE_TEXT})
+    assert "共 208 条" in summarize_openfda_approvals({"text": APPROVAL_TEXT})
+    assert "Dyspepsia" in summarize_openfda_adverse_events({"text": AE_TEXT})
+    assert "High Blood Pressure" in summarize_medlineplus_search(MEDLINE_DATA)
+
+
+def test_answer_shortage_formats(monkeypatch):
+    monkeypatch.setattr(opening, "DEFAULT_CATALOG", _registered())
+    monkeypatch.setattr(
+        opening,
+        "call_tool",
+        lambda name, params: ToolResult(
+            ok=True, name=name, data={"text": SHORTAGE_TEXT}, latency_ms=5
+        ),
+    )
+
+    result = answer_shortage(_state("布洛芬短缺吗？"))
+
+    text = result["rendered_text"]
+    assert "Carboplatin Injection" in text
+    assert "Limited Availability" in text
+    assert "来源：openFDA" in text
+    assert result["trace"][1]["called"] == "openfda_search_drug_shortages"
+
+
+def test_answer_approval_formats(monkeypatch):
+    monkeypatch.setattr(opening, "DEFAULT_CATALOG", _registered())
+    monkeypatch.setattr(
+        opening,
+        "call_tool",
+        lambda name, params: ToolResult(
+            ok=True, name=name, data={"text": APPROVAL_TEXT}, latency_ms=5
+        ),
+    )
+
+    result = answer_approval(_state("布洛芬 FDA 批准了吗？"))
+
+    text = result["rendered_text"]
+    assert "ANDA071265" in text
+    assert "CONTRACT PHARMACAL" in text
+    assert "Discontinued" in text
+
+
+def test_answer_adverse_events_keeps_disclaimer(monkeypatch):
+    monkeypatch.setattr(opening, "DEFAULT_CATALOG", _registered())
+    monkeypatch.setattr(
+        opening,
+        "call_tool",
+        lambda name, params: ToolResult(
+            ok=True, name=name, data={"text": AE_TEXT}, latency_ms=5
+        ),
+    )
+
+    result = answer_adverse_events(_state("布洛芬有什么不良反应？"))
+
+    text = result["rendered_text"]
+    assert "Dyspepsia" in text
+    assert "不能证明因果" in text
+    assert "来源：openFDA" in text
+
+
+def test_answer_health_topic_maps_chinese(monkeypatch):
+    monkeypatch.setattr(opening, "DEFAULT_CATALOG", _registered())
+    monkeypatch.setattr(
+        opening,
+        "call_tool",
+        lambda name, params: ToolResult(
+            ok=True, name=name, data=MEDLINE_DATA, latency_ms=5
+        ),
+    )
+
+    assert _health_topic_query("高血压是什么病？") == "hypertension"
+    result = answer_health_topic(_state("高血压是什么病？"))
+
+    text = result["rendered_text"]
+    assert "High Blood Pressure" in text
+    assert "MedlinePlus" in text
+    assert "不构成诊断或治疗建议" in text
+
+
+def test_trial_record_by_nct(monkeypatch):
+    monkeypatch.setattr(opening, "DEFAULT_CATALOG", _registered())
+
+    def fake_call(name, params):
+        assert name == "clinicaltrials_get_study_record"
+        return ToolResult(
+            ok=True, name=name, data={"text": TRIAL_RECORD_TEXT}, latency_ms=5
+        )
+
+    monkeypatch.setattr(opening, "call_tool", fake_call)
+    result = answer_clinical_trials(_state("NCT02205112 的详情"))
+
+    text = result["rendered_text"]
+    assert "NCT02205112" in text
+    assert "COMPLETED" in text
+    assert "Community-acquired Pneumonia" in text
+
+
+def test_pubmed_article_by_pmid(monkeypatch):
+    monkeypatch.setattr(opening, "DEFAULT_CATALOG", _registered())
+
+    def fake_call(name, params):
+        assert name == "pubmed_fetch_articles"
+        return ToolResult(
+            ok=True, name=name, data={"text": PUBMED_ARTICLE_TEXT}, latency_ms=5
+        )
+
+    monkeypatch.setattr(opening, "call_tool", fake_call)
+    result = answer_research(_state("PMID 40679934 的摘要"))
+
+    text = result["rendered_text"]
+    assert "PubMed 文献" in text
+    assert "BACKGROUND" in text
+    assert "DOI：10.1164/rccm.202507-1692ST" in text
+
+
+def test_new_external_paths_disabled_return_none(monkeypatch):
+    monkeypatch.setattr(opening, "DEFAULT_CATALOG", SimpleNamespace(get=lambda name: None))
+
+    assert answer_shortage(_state("布洛芬短缺吗？")) is None
+    assert answer_approval(_state("布洛芬 FDA 批准了吗？")) is None
+    assert answer_adverse_events(_state("布洛芬有什么不良反应？")) is None
+    assert answer_health_topic(_state("高血压是什么病？")) is None
+
+
+def test_external_reply_translates(monkeypatch):
+    monkeypatch.setattr(opening, "DEFAULT_CATALOG", _registered())
+    monkeypatch.setattr(
+        opening,
+        "call_tool",
+        lambda name, params: ToolResult(
+            ok=True, name=name, data=MEDLINE_DATA, latency_ms=5
+        ),
+    )
+    monkeypatch.setattr(
+        opening,
+        "localize_external",
+        lambda text: "来源：MedlinePlus。高血压健康教育摘要。",
+    )
+
+    result = answer_health_topic(_state("高血压是什么病？"))
+
+    assert result["rendered_text"] == "来源：MedlinePlus。高血压健康教育摘要。"
+    assert result["trace"][0]["translated"] is True
+
+
+def test_external_reply_rejects_unsafe_translation(monkeypatch):
+    monkeypatch.setattr(opening, "DEFAULT_CATALOG", _registered())
+    monkeypatch.setattr(
+        opening,
+        "call_tool",
+        lambda name, params: ToolResult(
+            ok=True, name=name, data={"text": OPENFDA_TEXT}, latency_ms=5
+        ),
+    )
+    monkeypatch.setattr(
+        opening,
+        "localize_external",
+        lambda text: "建议服用布洛芬，每次一片。来源：openFDA",
+    )
+
+    result = answer_drug_label(_state("布洛芬的说明书里有什么警示？"))
+
+    assert "FDA 说明书" in result["rendered_text"]
+    assert result["trace"][0]["translated"] is False
+
+
+def test_translated_gate_allows_package_size_but_blocks_usage():
+    assert translated_external_is_safe(
+        "D-0583-2018（II 类）；布洛芬片 USP，100 片/瓶。来源：openFDA"
+    )
+    assert not translated_external_is_safe(
+        "建议服用布洛芬，每次一片。来源：openFDA"
+    )
+
+
+def test_medlineplus_fetch_rejects_other_domains():
+    assert _fetch_medlineplus_text("https://example.com/topic") == ""
+
+
+def test_health_topic_uses_page_summary(monkeypatch):
+    monkeypatch.setenv("USE_MODEL", "1")
+    monkeypatch.setattr(opening, "DEFAULT_CATALOG", _registered())
+    monkeypatch.setattr(
+        opening,
+        "call_tool",
+        lambda name, params: ToolResult(
+            ok=True, name=name, data=MEDLINE_DATA, latency_ms=5
+        ),
+    )
+    monkeypatch.setattr(
+        opening, "_fetch_medlineplus_text", lambda url: "Blood pressure is the force ..."
+    )
+    monkeypatch.setattr(
+        opening,
+        "chat",
+        lambda *args, **kwargs: LLMResult(
+            content="高血压是血液对血管壁压力持续升高。",
+            model="qwen-plus",
+            input_tokens=10,
+            output_tokens=10,
+            latency_ms=10,
+            cost_estimate=None,
+        ),
+    )
+    monkeypatch.setattr(opening, "localize_external", lambda text: text)
+
+    result = answer_health_topic(_state("高血压是什么病？"))
+
+    text = result["rendered_text"]
+    assert "摘要：高血压是血液对血管壁压力持续升高。" in text
+    assert "MedlinePlus 健康主题：高血压" in text

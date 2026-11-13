@@ -548,13 +548,15 @@
 - M7 mock：**1.000**（新增 red_flag 组；department/guideline/risk 保持全对）
 - 单测：579 passed + 6 skipped（新增 16 条）
 
-**2026-11-13 · Phase C 补充：接入 openFDA、ClinicalTrials 与 PubMed**
+**2026-11-13 · Phase C 补充：接入 10 个外部 MCP 工具**
 
-- 白名单只放 `openfda_get_drug_label`、`openfda_search_recalls`、`clinicaltrials_search_studies`、`pubmed_search_articles`；工具一律 `read_only/external`
-- 使用托管 streamable HTTP 端点（`openfda` / `clinicaltrials` / `pubmed` 的 `*.caseyjhand.com`），绕开自托管 npx 的 Node 24 版本要求
-- 新增 `tools/external_summaries.py`：按 Markdown 解析说明书、召回、试验索引与 PubMed 题录；dedicated summarizer 进 decision 上下文
-- 新增确定性回答路径：`answer_drug_label`（说明书）、`answer_recall`（召回）、`answer_clinical_trials`（试验）、`answer_research`（文献），追问路径也可用 PubMed/试验
-- 安全：外部文案剔除剂量句、不带处方建议；必须有 openFDA/ClinicalTrials/PubMed 来源；工具未注册时自动回落到原逻辑
-- decision 的 tools 清单只保留 internal，避免模型选外部工具却无法把结果写进最终回答
-- 真实端到端：布洛芬说明书、布洛芬召回、CAP 临床试验、PubMed 题录均返回实时数据
-- 单测：**606 passed**（本机 pgvector 在线；CI 无库时为 600 + 6 skipped）
+- 四个 server，全部托管 HTTP：openFDA（说明书/召回/短缺/批准/不良反应）、ClinicalTrials.gov（检索/详情）、PubMed（检索/摘要）、MedlinePlus（疾病科普）
+- 白名单只放实际使用的 10 个只读工具；一律 `read_only/external`，decision 不可见，由确定性路径调用
+- 新增 `tools/external_summaries.py`：为说明书、召回、短缺、批准、FAERS、试验索引/详情、PubMed 题录/摘要、MedlinePlus 各写解析与摘要
+- 新增/扩展确定性路径：`answer_drug_label`、`answer_recall`、`answer_shortage`、`answer_approval`、`answer_adverse_events`、`answer_clinical_trials`（NCT 详情）、`answer_research`（PMID 摘要）、`answer_health_topic`
+- 安全：外部文案剔除剂量句、不带处方建议；FAERS 明确“自发报告不能证明因果”；必须有 openFDA/ClinicalTrials/PubMed/MedlinePlus 来源；工具未注册时自动回落
+- 真实端到端：10 条问题分别命中 10 个工具
+- 中文摘要：新增 `agent/translate.py`，`USE_MODEL=1` 时 10 个外部工具的结果统一经过 `localize_external`：先概括再翻译，保留编号/药名/来源；摘要缺来源行时按工具自动补回；失败保留原文
+- 摘要安全：独立译文闸门允许包装规格，拦用法用量与建议；摘要过长或改成英文会被拒绝
+- 健康科普：MedlinePlus 命中的首条会抓取页面正文，再用模型生成 2–3 句中文摘要（定义/表现/预防）；抓取或摘要失败时退回搜索片段
+- 单测：**625 passed**（本机 pgvector 在线；CI 无库时为 619 + 6 skipped）

@@ -11,6 +11,7 @@ openFDA 和 PubMed 的 server 返回 Markdown 文本，通用的 JSON 截断只�
 
 from __future__ import annotations
 
+import json
 import re
 
 from backend.app.tools.contract import clip_summary
@@ -175,6 +176,76 @@ def summarize_clinicaltrials_search(data) -> str:
     return clip_summary("；".join(parts))
 
 
+def summarize_clinicaltrials_record(data) -> str:
+    text = markdown_text(data)
+    head = re.search(r"^# Study (NCT\d+): (.+)$", text, re.MULTILINE)
+    status = re.search(r"\*\*Status:\*\*\s*([^|\n]+)", text)
+    if not head:
+        return clip_summary(_clean(text) or "试验详情：未返回内容。")
+    detail = f"{head.group(1)} {head.group(2)[:70]}"
+    if status:
+        detail += f"（{status.group(1).strip()}）"
+    return clip_summary("试验详情：" + detail)
+
+
+def summarize_openfda_shortages(data) -> str:
+    text = markdown_text(data)
+    total = re.search(r"\*\*(\d+) total results\*\*", text)
+    titles = re.findall(r"^###\s+(.+)$", text, re.MULTILINE)
+    if not titles:
+        return clip_summary(_clean(text) or "FDA短缺：未返回内容。")
+    parts = [f"FDA短缺：共 {total.group(1) if total else '?'} 条"]
+    parts.append("；".join(title.strip() for title in titles[:3]))
+    return clip_summary("；".join(parts))
+
+
+def summarize_openfda_approvals(data) -> str:
+    text = markdown_text(data)
+    total = re.search(r"\*\*(\d+) total results\*\*", text)
+    titles = re.findall(r"^###\s+(.+)$", text, re.MULTILINE)
+    if not titles:
+        return clip_summary(_clean(text) or "FDA批准：未返回内容。")
+    parts = [f"FDA批准：共 {total.group(1) if total else '?'} 条"]
+    parts.append("；".join(title.strip() for title in titles[:3]))
+    return clip_summary("；".join(parts))
+
+
+def summarize_openfda_adverse_events(data) -> str:
+    text = markdown_text(data)
+    total = re.search(r"\*\*(\d+) total results\*\*", text)
+    reactions = re.findall(r'"reactionmeddrapt":"([^"]+)"', text)
+    if not reactions:
+        return clip_summary(_clean(text) or "FAERS：未返回内容。")
+    return clip_summary(
+        f"FAERS不良反应：共 {total.group(1) if total else '?'} 条；"
+        f"示例反应：{'、'.join(reactions[:4])}；自发报告不能证明因果。"
+    )
+
+
+def medlineplus_payload(data) -> dict:
+    payload = data if isinstance(data, dict) else {}
+    if "results" not in payload and isinstance(payload.get("text"), str):
+        try:
+            payload = json.loads(payload["text"])
+        except json.JSONDecodeError:
+            payload = {}
+    return payload
+
+
+def summarize_medlineplus_search(data) -> str:
+    payload = medlineplus_payload(data)
+    results = payload.get("results") or []
+    if not results:
+        return "MedlinePlus：未返回健康主题。"
+    titles = [
+        re.sub(r"<[^>]+>", "", str(item.get("title") or "")).strip()
+        for item in results[:3]
+    ]
+    return clip_summary(
+        f"MedlinePlus：共 {payload.get('total', '?')} 条；" + "；".join(titles)
+    )
+
+
 def summarize_pubmed_search(data) -> str:
     text = markdown_text(data)
     total, returned = pubmed_counts(text)
@@ -205,7 +276,12 @@ def summarize_pubmed_fetch(data) -> str:
 SUMMARIZERS = {
     "openfda_get_drug_label": summarize_openfda_label,
     "openfda_search_recalls": summarize_openfda_recalls,
+    "openfda_search_drug_shortages": summarize_openfda_shortages,
+    "openfda_search_drug_approvals": summarize_openfda_approvals,
+    "openfda_search_adverse_events": summarize_openfda_adverse_events,
     "clinicaltrials_search_studies": summarize_clinicaltrials_search,
+    "clinicaltrials_get_study_record": summarize_clinicaltrials_record,
     "pubmed_search_articles": summarize_pubmed_search,
     "pubmed_fetch_articles": summarize_pubmed_fetch,
+    "medlineplus_search": summarize_medlineplus_search,
 }

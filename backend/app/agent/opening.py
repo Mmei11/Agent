@@ -6,29 +6,42 @@
 
 import os
 import re
+from html.parser import HTMLParser
+from urllib.parse import urlparse
+
+import httpx
 
 from backend.app.agent.followup import REPLY_OPTIONS
 from backend.app.agent.general import (
+    CONDITION_ALIASES,
+    DRUG_NAME_ALIASES,
     GENERAL_FALLBACK,
     RED_FLAG_FALLBACK,
     external_answer_is_safe,
     general_answer_is_safe,
+    is_adverse_event_question,
+    is_approval_question,
     is_clinical_trial_question,
     is_drug_label_question,
     is_guideline_question,
+    is_health_topic_question,
     is_recall_question,
     is_red_flag_question,
     is_research_question,
+    is_shortage_question,
     red_flag_answer_is_safe,
+    translated_external_is_safe,
 )
 from backend.app.agent.router import route as route_reply
 from backend.app.agent.state import ConsultationState
+from backend.app.agent.translate import localize_external
 from backend.app.drugs.lookup import load_labels
-from backend.app.llm.client import LLMError, LLMResult
+from backend.app.llm.client import LLMError, LLMResult, chat
 from backend.app.observability import current_trace
 from backend.app.tools.catalog import DEFAULT_CATALOG
 from backend.app.tools.external_summaries import (
     markdown_text,
+    medlineplus_payload,
     parse_openfda_label,
     pubmed_counts,
     safe_snippet,
@@ -193,6 +206,25 @@ def answer_red_flags(state: ConsultationState, *, node: str = "general_route") -
     }
 
 
+def _source_line(tool_name: str) -> str:
+    if tool_name.startswith("openfda"):
+        return "来源：openFDA。"
+    if tool_name.startswith("pubmed"):
+        return "来源：PubMed。"
+    if tool_name.startswith("clinicaltrials"):
+        return "来源：ClinicalTrials.gov。"
+    if tool_name.startswith("medlineplus"):
+        return "来源：MedlinePlus。"
+    return ""
+
+
+def _has_source_marker(text: str) -> bool:
+    return any(
+        marker in text
+        for marker in ("openFDA", "PubMed", "ClinicalTrials", "MedlinePlus")
+    )
+
+
 def _external_reply(
     state: ConsultationState,
     *,
@@ -202,8 +234,25 @@ def _external_reply(
     outcome,
     args_keys: list[str],
     trace_extra: dict,
+    localize: bool = True,
 ) -> dict:
-    """外部工具回答的统一外壳：文案 + 原始结果 + 两条 trace。"""
+    """外部工具回答的统一外壳：中文摘要 + 文案 + 原始结果 + 两条 trace。"""
+    original_text = text
+    if localize:
+        localized_text = localize_external(text)
+        # 摘要也必须过安全闸门；失败就退回原文，不让摘要引入剂量或建议。
+        if localized_text != original_text and not translated_external_is_safe(
+            localized_text
+        ):
+            localized_text = original_text
+        text = localized_text
+    translated = text != original_text
+
+    # 摘要可能压掉来源行；按工具补回，保证可核验。
+    source_line = _source_line(tool_name)
+    if source_line and not _has_source_marker(text):
+        text = f"{text}\n{source_line}"
+
     scope = current_trace()
     trace_id = scope.trace_id if scope else ""
     tool_data = (
@@ -224,6 +273,7 @@ def _external_reply(
                 "source": "general",
                 "tool": tool_name,
                 "tool_ok": outcome.ok,
+                "translated": translated,
                 "trace_id": trace_id,
                 **trace_extra,
             },
@@ -250,6 +300,9 @@ def _english_drug_name(message: str) -> str:
             candidate = alias.lower().strip()
             if re.fullmatch(r"[a-z][a-z \-]*", candidate):
                 return candidate
+    for chinese, english in DRUG_NAME_ALIASES.items():
+        if chinese in lowered:
+            return english
     return ""
 
 
@@ -314,6 +367,22 @@ def answer_drug_label(state: ConsultationState, *, node: str = "general_route") 
 def _clip_plain(text: str, limit: int) -> str:
     text = " ".join(str(text).split())
     return text if len(text) <= limit else text[: limit - 1].rstrip() + "…"
+
+
+def _markdown_blocks(text: str) -> list[tuple[str, str]]:
+    """按 `### 标题` 切块，返回 (标题, 整块正文)。"""
+    parts = re.split(r"^###\s+", text, flags=re.MULTILINE)[1:]
+    blocks = []
+    for part in parts:
+        lines = part.splitlines()
+        if lines and lines[0].strip():
+            blocks.append((lines[0].strip(), part))
+    return blocks
+
+
+def _markdown_field(block: str, name: str) -> str:
+    match = re.search(rf"\*\*{name}:\*\*\s*(.+)", block)
+    return match.group(1).strip() if match else ""
 
 
 _DOSE_IN_TEXT = re.compile(
@@ -424,6 +493,372 @@ def answer_recall(state: ConsultationState, *, node: str = "general_route") -> d
     )
 
 
+def answer_shortage(state: ConsultationState, *, node: str = "general_route") -> dict | None:
+    """FDA 药品短缺：只列状态、供应与厂商。"""
+    if not is_shortage_question(state.latest_user_message):
+        return None
+    tool_name = "openfda_search_drug_shortages"
+    if DEFAULT_CATALOG.get(tool_name) is None:
+        return None
+
+    drug = _english_drug_name(state.latest_user_message)
+    if not drug:
+        return None
+
+    outcome = call_tool(tool_name, {"search": f'generic_name:"{drug}"', "limit": 3})
+    payload = markdown_text((outcome.data or {}) if outcome.ok else "")
+    entries = []
+    for title, block in _markdown_blocks(payload):
+        entries.append(
+            {
+                "title": title,
+                "status": _markdown_field(block, "Status"),
+                "availability": _markdown_field(block, "Availability"),
+                "category": _markdown_field(block, "Therapeutic category"),
+                "manufacturer": _markdown_field(block, "Manufacturer"),
+            }
+        )
+
+    if entries:
+        total = re.search(r"\*\*(\d+) total results\*\*", payload)
+        lines = [
+            f"FDA 药品短缺记录（共 {total.group(1)} 条）："
+            if total
+            else "FDA 药品短缺记录："
+        ]
+        for index, entry in enumerate(entries[:3], start=1):
+            parts = [entry["title"]]
+            if entry["status"]:
+                parts.append(f"状态：{entry['status']}")
+            if entry["availability"]:
+                parts.append(f"供应：{entry['availability']}")
+            if entry["category"]:
+                parts.append(f"类别：{entry['category']}")
+            if entry["manufacturer"]:
+                parts.append(f"厂商：{_clip_plain(entry['manufacturer'], 40)}")
+            lines.append(f"{index}. " + "；".join(parts))
+        lines.append("来源：openFDA 药品短缺数据库。短缺状态会变化，请以官方公告为准。")
+        text = "\n".join(lines)
+    else:
+        text = f"没有查到 {drug} 的 FDA 短缺记录（来源：openFDA）。"
+
+    if not external_answer_is_safe(text):
+        text = "外部药品短缺信息暂无法安全展示；请以官方公告为准。"
+
+    return _external_reply(
+        state,
+        node=node,
+        tool_name=tool_name,
+        text=text,
+        outcome=outcome,
+        args_keys=["search", "limit"],
+        trace_extra={"openfda_shortages": True, "hits": len(entries)},
+    )
+
+
+def answer_approval(state: ConsultationState, *, node: str = "general_route") -> dict | None:
+    """Drugs@FDA 批准记录：只列申请号、申请方与首个产品状态。"""
+    if not is_approval_question(state.latest_user_message):
+        return None
+    tool_name = "openfda_search_drug_approvals"
+    if DEFAULT_CATALOG.get(tool_name) is None:
+        return None
+
+    drug = _english_drug_name(state.latest_user_message)
+    if not drug:
+        return None
+
+    outcome = call_tool(
+        tool_name, {"search": f'products.brand_name:"{drug}"', "limit": 2}
+    )
+    payload = markdown_text((outcome.data or {}) if outcome.ok else "")
+    entries = []
+    for title, block in _markdown_blocks(payload):
+        head = re.search(
+            r"\*\*Application:\*\*\s*([^|]+)\|\s*\*\*Sponsor:\*\*\s*(.+)", block
+        )
+        product = re.search(r"\*\*Products:\*\*\s*\n-\s*(.+)", block)
+        entries.append(
+            {
+                "title": title,
+                "application": head.group(1).strip() if head else "",
+                "sponsor": _clip_plain(head.group(2).strip(), 40) if head else "",
+                "product_status": (
+                    product.group(1).split("|")[-1].strip() if product else ""
+                ),
+            }
+        )
+
+    if entries:
+        total = re.search(r"\*\*(\d+) total results\*\*", payload)
+        lines = [
+            f"FDA 批准记录（共 {total.group(1)} 条）：" if total else "FDA 批准记录："
+        ]
+        for index, entry in enumerate(entries[:3], start=1):
+            parts = [entry["title"]]
+            if entry["application"]:
+                parts.append(entry["application"])
+            if entry["sponsor"]:
+                parts.append(f"申请方：{entry['sponsor']}")
+            if entry["product_status"]:
+                parts.append(f"产品状态：{entry['product_status']}")
+            lines.append(f"{index}. " + "；".join(parts))
+        lines.append(
+            "来源：openFDA Drugs@FDA。仅代表美国批准记录，不代表中国上市情况。"
+        )
+        text = "\n".join(lines)
+    else:
+        text = f"没有查到 {drug} 的 FDA 批准记录（来源：openFDA）。"
+
+    if not external_answer_is_safe(text):
+        text = "外部药品批准信息暂无法安全展示；请以官方公告为准。"
+
+    return _external_reply(
+        state,
+        node=node,
+        tool_name=tool_name,
+        text=text,
+        outcome=outcome,
+        args_keys=["search", "limit"],
+        trace_extra={"openfda_approvals": True, "hits": len(entries)},
+    )
+
+
+def answer_adverse_events(
+    state: ConsultationState, *, node: str = "general_route"
+) -> dict | None:
+    """FAERS 自发报告：只展示总量与一条示例，并明确不能证明因果。"""
+    if not is_adverse_event_question(state.latest_user_message):
+        return None
+    tool_name = "openfda_search_adverse_events"
+    if DEFAULT_CATALOG.get(tool_name) is None:
+        return None
+
+    drug = _english_drug_name(state.latest_user_message)
+    if not drug:
+        return None
+
+    outcome = call_tool(
+        tool_name,
+        {
+            "category": "drug",
+            "search": f'patient.drug.medicinalproduct:"{drug}"',
+            "limit": 1,
+            "fields": [
+                "patient.reaction.reactionmeddrapt",
+                "serious",
+                "receiptdate",
+                "patient.drug.medicinalproduct",
+            ],
+        },
+    )
+    payload = markdown_text((outcome.data or {}) if outcome.ok else "")
+    total = re.search(r"\*\*(\d+) total results\*\*", payload)
+    reactions = re.findall(r'"reactionmeddrapt":"([^"]+)"', payload)
+    serious = re.search(r"\*\*Serious:\*\*\s*(\S+)", payload)
+    date = re.search(r"\*\*Receiptdate:\*\*\s*(\d{8})", payload)
+
+    if reactions:
+        lines = [
+            f"FAERS 不良反应报告（共 {total.group(1) if total else '?'} 条，展示 1 条示例）："
+        ]
+        detail = []
+        if date:
+            detail.append(f"报告日期：{_format_date(date.group(1))}")
+        if serious:
+            serious_text = "是" if serious.group(1) in {"1", "Yes", "true"} else serious.group(1)
+            detail.append(f"严重：{serious_text}")
+        detail.append("反应：" + "、".join(reactions[:4]))
+        lines.append("；".join(detail))
+        lines.append(
+            "注意：自发报告不能证明因果，也不能代表发生率；仅作药物安全信号参考。"
+        )
+        lines.append("来源：openFDA FAERS。")
+        text = "\n".join(lines)
+    else:
+        text = f"没有查到 {drug} 的 FAERS 报告（来源：openFDA）。"
+
+    if not external_answer_is_safe(text):
+        text = "外部不良反应信息暂无法安全展示；请咨询专业人员。"
+
+    return _external_reply(
+        state,
+        node=node,
+        tool_name=tool_name,
+        text=text,
+        outcome=outcome,
+        args_keys=["category", "search", "limit", "fields"],
+        trace_extra={"openfda_adverse_events": True, "hits": len(reactions)},
+    )
+
+
+def _health_topic_label(message: str) -> str:
+    for chinese in CONDITION_ALIASES:
+        if chinese in message:
+            return chinese
+    return _health_topic_query(message)
+
+
+def _health_topic_query(message: str) -> str:
+    for chinese, english in CONDITION_ALIASES.items():
+        if chinese in message:
+            return english
+    text = re.sub(
+        r"(什么是|是什么病|是什么|有什么症状|有哪些症状|怎么预防|如何预防|科普|的|？|?)",
+        " ",
+        message,
+    )
+    return " ".join(text.split()) or message.strip()
+
+
+class _TopicTextExtractor(HTMLParser):
+    SKIP = {"script", "style", "nav", "header", "footer", "form", "noscript"}
+
+    def __init__(self):
+        super().__init__()
+        self._skip = 0
+        self.parts: list[str] = []
+
+    def handle_starttag(self, tag, attrs):
+        if tag in self.SKIP:
+            self._skip += 1
+
+    def handle_endtag(self, tag):
+        if tag in self.SKIP and self._skip:
+            self._skip -= 1
+
+    def handle_data(self, data):
+        if not self._skip and data.strip():
+            self.parts.append(data.strip())
+
+
+def _fetch_medlineplus_text(url: str, limit: int = 6000) -> str:
+    """只抓 MedlinePlus 页面正文；其他域名一律拒绝。"""
+    host = urlparse(url).hostname or ""
+    if host not in {"medlineplus.gov", "www.medlineplus.gov"}:
+        return ""
+    try:
+        with httpx.Client(timeout=6.0, follow_redirects=True) as client:
+            response = client.get(url, headers={"User-Agent": "consult-lab-demo/1.0"})
+            response.raise_for_status()
+    except Exception:
+        return ""
+
+    # 重定向后仍必须落在 MedlinePlus 域名内。
+    final_host = urlparse(str(response.url)).hostname or ""
+    if final_host not in {"medlineplus.gov", "www.medlineplus.gov"}:
+        return ""
+
+    parser = _TopicTextExtractor()
+    parser.feed(response.text)
+    return " ".join(parser.parts)[:limit]
+
+
+def _summarize_health_topic(topic: str, page_text: str) -> str:
+    if os.getenv("USE_MODEL") != "1" or not page_text.strip():
+        return ""
+    try:
+        result = chat(
+            [
+                {
+                    "role": "system",
+                    "content": (
+                        "你是健康教育编辑。只根据给定内容，用 2-3 句简体中文"
+                        "概括核心信息：定义、主要表现、预防。不要补充未出现的事实，"
+                        "不要给诊断、治疗或用药建议。不超过 160 字。"
+                    ),
+                },
+                {"role": "user", "content": f"主题：{topic}\n内容：{page_text}"},
+            ],
+            max_tokens=320,
+            temperature=0.0,
+            timeout=20.0,
+            prompt_name="health.summary",
+            prompt_version="v1",
+        )
+    except Exception:
+        return ""
+
+    summary = (result.content or "").strip()
+    if not summary:
+        return ""
+    # 摘要本身也要过安全闸门；加来源标记复用同一套规则。
+    if not translated_external_is_safe(summary + " 来源：MedlinePlus"):
+        return ""
+    return summary
+
+
+def answer_health_topic(
+    state: ConsultationState, *, node: str = "general_route"
+) -> dict | None:
+    """MedlinePlus 健康主题：抓页面正文后做中文摘要，失败退回搜索片段。"""
+    if not is_health_topic_question(state.latest_user_message):
+        return None
+    tool_name = "medlineplus_search"
+    if DEFAULT_CATALOG.get(tool_name) is None:
+        return None
+
+    query = _health_topic_query(state.latest_user_message)
+    outcome = call_tool(tool_name, {"query": query, "limit": 3})
+    payload = medlineplus_payload((outcome.data or {}) if outcome.ok else {})
+    results = payload.get("results") or []
+    summary = ""
+
+    if results:
+        titles = [
+            re.sub(r"<[^>]+>", "", str(item.get("title") or "")).strip()
+            for item in results[:3]
+        ]
+        summary = ""
+        if os.getenv("USE_MODEL") == "1" and results[0].get("url"):
+            page_text = _fetch_medlineplus_text(str(results[0]["url"]))
+            summary = _summarize_health_topic(titles[0], page_text)
+
+        if summary:
+            label = _health_topic_label(state.latest_user_message)
+            lines = [
+                f"MedlinePlus 健康主题：{_clip_plain(label, 60)}",
+                f"摘要：{summary}",
+            ]
+            related = [title for title in titles[1:] if title]
+            if related:
+                lines.append(
+                    "相关主题：" + "；".join(_clip_plain(title, 50) for title in related)
+                )
+        else:
+            lines = [f"MedlinePlus 健康主题（共 {payload.get('total', '?')} 条）："]
+            for index, item in enumerate(results[:3], start=1):
+                snippet = re.sub(
+                    r"<[^>]+>", "", str(item.get("snippet") or "")
+                ).strip()
+                line = f"{index}. {_clip_plain(titles[index - 1], 60)}"
+                if index == 1 and snippet:
+                    line += f" — {_clip_plain(snippet, 220)}"
+                lines.append(line)
+        lines.append(
+            "来源：MedlinePlus（美国国家医学图书馆）。仅作健康教育，不构成诊断或治疗建议。"
+        )
+        text = "\n".join(lines)
+    else:
+        text = (
+            f"没有查到相关健康主题（MedlinePlus）：{query}。"
+            "建议换英文关键词再试。"
+        )
+
+    if not translated_external_is_safe(text):
+        text = "外部健康主题暂无法安全展示；建议直接访问 MedlinePlus 查询。"
+
+    return _external_reply(
+        state,
+        node=node,
+        tool_name=tool_name,
+        text=text,
+        outcome=outcome,
+        args_keys=["query", "limit"],
+        trace_extra={"medlineplus": True, "hits": len(results)},
+    )
+
+
 def _trial_query(message: str) -> str:
     text = re.sub(
         r"(帮我|请|查一下|搜一下|找一下|检索|有没有|有哪些|有什么|相关|关于|"
@@ -462,15 +897,67 @@ def _trial_entries(text: str) -> list[dict]:
     return entries
 
 
+def _trial_record_text(text: str) -> str:
+    head = re.search(r"^# Study (NCT\d+): (.+)$", text, flags=re.MULTILINE)
+    if not head:
+        return ""
+    status = re.search(r"\*\*Status:\*\*\s*([^|\n]+)", text)
+    conditions = re.search(r"\*\*Conditions:\*\*\s*(.+)", text)
+    sponsor = re.search(r"\*\*Sponsor:\*\*\s*(.+)", text)
+    dates = re.search(r"\*\*Dates:\*\*\s*(.+)", text)
+
+    lines = [f"{head.group(1)}：{_clip_plain(head.group(2), 80)}"]
+    if status:
+        lines.append(f"状态：{status.group(1).strip()}")
+    if conditions:
+        lines.append(f"条件：{_clip_plain(conditions.group(1), 60)}")
+    if sponsor:
+        lines.append(f"发起方：{_clip_plain(sponsor.group(1), 50)}")
+    if dates:
+        lines.append(f"时间：{_clip_plain(dates.group(1), 80)}")
+    lines.append(
+        "来源：ClinicalTrials.gov。试验信息不代表适合你，是否入组需由研究方评估。"
+    )
+    return "\n".join(lines)
+
+
 def answer_clinical_trials(
     state: ConsultationState, *, node: str = "general_route"
 ) -> dict | None:
-    """ClinicalTrials.gov 检索：只返回 NCT 编号、标题与状态，不判断是否适合。"""
+    """ClinicalTrials.gov：NCT 编号给详情，否则按主题检索。"""
     if not is_clinical_trial_question(state.latest_user_message):
         return None
     tool_name = "clinicaltrials_search_studies"
     if DEFAULT_CATALOG.get(tool_name) is None:
         return None
+
+    nct_match = re.search(
+        r"\bNCT\d{8}\b", state.latest_user_message, flags=re.IGNORECASE
+    )
+    record_tool = "clinicaltrials_get_study_record"
+    if nct_match and DEFAULT_CATALOG.get(record_tool) is not None:
+        outcome = call_tool(
+            record_tool,
+            {
+                "nctId": nct_match.group(0).upper(),
+                "locationLimit": 1,
+                "outcomeLimit": 0,
+                "referenceLimit": 0,
+            },
+        )
+        payload = markdown_text((outcome.data or {}) if outcome.ok else "")
+        text = _trial_record_text(payload) or "没有查到该 NCT 编号的试验详情。"
+        if not external_answer_is_safe(text):
+            text = "外部试验详情暂无法安全展示；建议直接访问 ClinicalTrials.gov 查询。"
+        return _external_reply(
+            state,
+            node=node,
+            tool_name=record_tool,
+            text=text,
+            outcome=outcome,
+            args_keys=["nctId", "locationLimit", "outcomeLimit", "referenceLimit"],
+            trace_extra={"clinicaltrials_record": True},
+        )
 
     query = _trial_query(state.latest_user_message)
     outcome = call_tool(tool_name, {"query": query, "pageSize": 3})
@@ -554,13 +1041,61 @@ def _pubmed_entries(text: str) -> list[dict]:
     return entries
 
 
+def _pubmed_article_text(text: str) -> str:
+    title = re.search(r"^###\s+(.+)$", text, flags=re.MULTILINE)
+    if not title:
+        return ""
+    journal = re.search(r"\*\*Journal:\*\*\s*(.+)", text)
+    doi = re.search(r"\*\*DOI:\*\*\s*(\S+)", text)
+    abstract = re.search(
+        r"^#### Abstract\s*\n(.+?)(?=^####|^## |\Z)",
+        text,
+        flags=re.MULTILINE | re.DOTALL,
+    )
+
+    lines = [f"PubMed 文献：{_clip_plain(title.group(1), 80)}"]
+    if journal:
+        lines.append(f"期刊：{_clip_plain(journal.group(1), 80)}")
+    if doi:
+        lines.append(f"DOI：{doi.group(1)}")
+    if abstract:
+        lines.append("摘要：" + _clip_plain(abstract.group(1), 300))
+    lines.append("来源：PubMed。仅作文献信息展示，不构成诊断或治疗建议。")
+    return "\n".join(lines)
+
+
 def answer_research(state: ConsultationState, *, node: str = "general_route") -> dict | None:
-    """PubMed 文献检索：只返回题录与 PMID/DOI，不给临床结论。"""
+    """PubMed：带 PMID 取摘要，否则按主题检索。"""
     if not is_research_question(state.latest_user_message):
         return None
     tool_name = "pubmed_search_articles"
     if DEFAULT_CATALOG.get(tool_name) is None:
         return None
+
+    pmid_match = re.search(
+        r"\bPMID\s*[:：]?\s*(\d{6,9})\b",
+        state.latest_user_message,
+        flags=re.IGNORECASE,
+    )
+    fetch_tool = "pubmed_fetch_articles"
+    if pmid_match and DEFAULT_CATALOG.get(fetch_tool) is not None:
+        outcome = call_tool(
+            fetch_tool,
+            {"pmids": [pmid_match.group(1)], "includeMesh": False},
+        )
+        payload = markdown_text((outcome.data or {}) if outcome.ok else "")
+        text = _pubmed_article_text(payload) or "没有查到该 PMID 的文献（来源：PubMed）。"
+        if not external_answer_is_safe(text):
+            text = "外部文献摘要暂无法安全展示；建议直接访问 PubMed 查询。"
+        return _external_reply(
+            state,
+            node=node,
+            tool_name=fetch_tool,
+            text=text,
+            outcome=outcome,
+            args_keys=["pmids", "includeMesh"],
+            trace_extra={"pubmed": True, "pmid": True},
+        )
 
     query = _research_query(state.latest_user_message)
     outcome = call_tool(
@@ -594,7 +1129,7 @@ def answer_research(state: ConsultationState, *, node: str = "general_route") ->
             if ids:
                 line += f"；{ids}"
             lines.append(line)
-        lines.append("以上为文献题录，不构成诊断或治疗建议。")
+        lines.append("来源：PubMed。以上为文献题录，不构成诊断或治疗建议。")
         text = "\n".join(lines)
     else:
         text = (
@@ -629,12 +1164,24 @@ def route_general(state: ConsultationState) -> dict:
     recall_reply = answer_recall(state, node="general_route")
     if recall_reply is not None:
         return recall_reply
+    shortage_reply = answer_shortage(state, node="general_route")
+    if shortage_reply is not None:
+        return shortage_reply
+    approval_reply = answer_approval(state, node="general_route")
+    if approval_reply is not None:
+        return approval_reply
+    adverse_reply = answer_adverse_events(state, node="general_route")
+    if adverse_reply is not None:
+        return adverse_reply
     trial_reply = answer_clinical_trials(state, node="general_route")
     if trial_reply is not None:
         return trial_reply
     research_reply = answer_research(state, node="general_route")
     if research_reply is not None:
         return research_reply
+    topic_reply = answer_health_topic(state, node="general_route")
+    if topic_reply is not None:
+        return topic_reply
 
     # 就医准备类问题先走确定性工具，不依赖模型是否把它判成普通问题。
     if is_guideline_question(state.latest_user_message):

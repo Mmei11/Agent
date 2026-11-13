@@ -24,6 +24,7 @@ from backend.app.agent.memory_ref import is_memory_reference
 from backend.app.agent.opening import (
     answer_clinical_trials,
     answer_guideline,
+    answer_health_topic,
     answer_red_flags,
     answer_research,
 )
@@ -414,6 +415,11 @@ def answer_followup(state: ConsultationState) -> dict:
     trial_reply = answer_clinical_trials(state, node="answer")
     if trial_reply is not None:
         return trial_reply
+
+    # 健康主题追问：MedlinePlus 只在工具已注册时接管。
+    topic_reply = answer_health_topic(state, node="answer")
+    if topic_reply is not None:
+        return topic_reply
 
     # 文献检索追问：只有 PubMed 工具已注册时才接管。
     research_reply = answer_research(state, node="answer")

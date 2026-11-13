@@ -254,7 +254,7 @@
 
 ### Phase C｜工具运行时与 MCP client（5–7 天）
 
-> 进展（2026-11-13）：Phase C 验收项已全部落地——工具目录与风险分级、决策层选工具与预算、工具结果摘要（≤400 字）、stdio/HTTP MCP client、`red_flag_lookup` 红旗科普场景、外部工具失败降级“暂无依据”。另外接入了 openFDA（说明书/召回）、ClinicalTrials.gov（试验检索）与 PubMed（文献检索）三个真实外部 MCP（托管 HTTP）：各有确定性路径、专用摘要和剂量过滤，工具未启用时自动回落。剩余两项低优先级回滚开关未做：`tool_results` 按调用序号记历史、`TOOL_RUNTIME=legacy`。
+> 进展（2026-11-13）：Phase C 验收项已全部落地——工具目录与风险分级、决策层选工具与预算、工具结果摘要（≤400 字）、stdio/HTTP MCP client、`red_flag_lookup` 红旗科普场景、外部工具失败降级“暂无依据”。另外接入 10 个真实外部 MCP 工具（托管 HTTP）：openFDA（说明书/召回/短缺/批准/不良反应）、ClinicalTrials.gov（检索/详情）、PubMed（检索/摘要）、MedlinePlus（疾病科普），各有确定性路径、专用摘要和剂量过滤；`USE_MODEL=1` 时所有外部结果统一经中文摘要层（保留编号与来源），MedlinePlus 健康主题会抓取页面正文做 2–3 句摘要。剩余两项低优先级回滚开关未做：`tool_results` 按调用序号记历史、`TOOL_RUNTIME=legacy`。
 
 **工程问题：** 工具契约已经很完整，但决策层不会选工具、不会传参数；外部 MCP 工具没有入口；工具结果没有摘要；多个工具之间没有调用预算。
 

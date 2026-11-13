@@ -89,9 +89,7 @@ def red_flag_answer_is_safe(text: str) -> bool:
 
 # 外部工具类问题：药品说明书与文献检索。
 DRUG_LABEL_PATTERNS = (
-    re.compile(r"(说明书|药品说明|用药说明|药品标签|药物标签)"),
-    re.compile(r"\b(fda|openfda)\b", re.IGNORECASE),
-    re.compile(r"(药品禁忌|用药禁忌|不良反应|药品警示|用药警示)"),
+    re.compile(r"(说明书|药品说明|用药说明|药品标签|药物标签|禁忌|警示|警告)"),
 )
 
 RESEARCH_PATTERNS = (
@@ -112,6 +110,49 @@ CLINICAL_TRIAL_PATTERNS = (
 )
 
 RECALL_PATTERNS = (re.compile(r"(召回|下架|批次问题|批次不合格|召回事件)"),)
+
+SHORTAGE_PATTERNS = (re.compile(r"(短缺|缺货|供应不足|断货|shortage)", re.IGNORECASE),)
+
+APPROVAL_PATTERNS = (
+    re.compile(r"(fda[^。！？\n]{0,4}批准|批准上市|获批|approval|approved)", re.IGNORECASE),
+)
+
+ADVERSE_EVENT_PATTERNS = (
+    re.compile(r"(不良反应|副作用|不良事件|安全信号|adverse\s*event)", re.IGNORECASE),
+)
+
+HEALTH_TOPIC_PATTERNS = (
+    re.compile(r"(什么是|是什么病|是什么|有什么症状|有哪些症状|怎么预防|如何预防|科普)"),
+)
+
+# 只覆盖常见演示病种；MedlinePlus 是英文源，中文问题先映射成英文。
+CONDITION_ALIASES = {
+    "高血压": "hypertension",
+    "糖尿病": "diabetes",
+    "偏头痛": "migraine",
+    "哮喘": "asthma",
+    "肺炎": "pneumonia",
+    "胃炎": "gastritis",
+    "湿疹": "eczema",
+    "痛风": "gout",
+    "贫血": "anemia",
+    "甲状腺": "thyroid",
+    "抑郁": "depression",
+    "焦虑": "anxiety",
+}
+
+# 本地 OTC 标签之外，给外部药品工具补一层常见药名映射。
+DRUG_NAME_ALIASES = {
+    "卡铂": "carboplatin",
+    "顺铂": "cisplatin",
+    "二甲双胍": "metformin",
+    "阿司匹林": "aspirin",
+    "阿托伐他汀": "atorvastatin",
+    "阿莫西林": "amoxicillin",
+    "胰岛素": "insulin",
+    "布地奈德": "budesonide",
+    "奥司他韦": "oseltamivir",
+}
 
 # 外部文案的安全闸门：比普通回答多挡一层英文剂量表达。
 EXTERNAL_DOSAGE_PATTERNS = (
@@ -134,12 +175,16 @@ def is_drug_label_question(message: str) -> bool:
 def is_research_question(message: str) -> bool:
     """是否在明确要文献/研究证据，而不是问症状。"""
     text = (message or "").strip()
+    if re.search(r"\bpmid\b", text, re.IGNORECASE):
+        return True
     return bool(text) and any(pattern.search(text) for pattern in RESEARCH_PATTERNS)
 
 
 def is_clinical_trial_question(message: str) -> bool:
-    """是否在问临床试验/招募，而不是普通治疗问题。"""
+    """是否在问临床试验/招募，或直接给了一个 NCT 编号。"""
     text = (message or "").strip()
+    if re.search(r"\bNCT\d{8}\b", text, re.IGNORECASE):
+        return True
     return bool(text) and any(
         pattern.search(text) for pattern in CLINICAL_TRIAL_PATTERNS
     )
@@ -151,6 +196,30 @@ def is_recall_question(message: str) -> bool:
     return bool(text) and any(pattern.search(text) for pattern in RECALL_PATTERNS)
 
 
+def is_shortage_question(message: str) -> bool:
+    text = (message or "").strip()
+    return bool(text) and any(pattern.search(text) for pattern in SHORTAGE_PATTERNS)
+
+
+def is_approval_question(message: str) -> bool:
+    text = (message or "").strip()
+    return bool(text) and any(pattern.search(text) for pattern in APPROVAL_PATTERNS)
+
+
+def is_adverse_event_question(message: str) -> bool:
+    text = (message or "").strip()
+    return bool(text) and any(
+        pattern.search(text) for pattern in ADVERSE_EVENT_PATTERNS
+    )
+
+
+def is_health_topic_question(message: str) -> bool:
+    text = (message or "").strip()
+    return bool(text) and any(
+        pattern.search(text) for pattern in HEALTH_TOPIC_PATTERNS
+    )
+
+
 def external_answer_is_safe(text: str) -> bool:
     """外部结果的组织文案：必须带来源、不得出现剂量或处方建议。"""
     text = text.strip()
@@ -160,7 +229,31 @@ def external_answer_is_safe(text: str) -> bool:
         return False
     if any(pattern.search(text) for pattern in EXTERNAL_DOSAGE_PATTERNS):
         return False
-    return any(marker in text for marker in ("openFDA", "PubMed", "ClinicalTrials"))
+    return any(
+        marker in text
+        for marker in ("openFDA", "PubMed", "ClinicalTrials", "MedlinePlus")
+    )
+
+
+TRANSLATED_UNSAFE_PATTERNS = (
+    re.compile(r"(建议|推荐)(服用|使用|吃)"),
+    re.compile(r"(每次|每日|一日|一天)[^。；\n]{0,10}(\d+|一片|两片|半片)"),
+    re.compile(r"(用法用量|服用方法|建议剂量|推荐剂量|每日剂量|每次剂量|剂量为|剂量：)"),
+    re.compile(r"\b(take|taking)\b[^.]{0,40}\b(every|hours|days)\b", re.IGNORECASE),
+)
+
+
+def translated_external_is_safe(text: str) -> bool:
+    """译文的安全闸门：允许“100 片/瓶”这类包装规格，只拦真正的用法建议。"""
+    text = text.strip()
+    if not 5 <= len(text) <= 900:
+        return False
+    if any(pattern.search(text) for pattern in TRANSLATED_UNSAFE_PATTERNS):
+        return False
+    return any(
+        marker in text
+        for marker in ("openFDA", "PubMed", "ClinicalTrials", "MedlinePlus")
+    )
 
 
 def display_now() -> datetime:
