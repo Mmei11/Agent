@@ -19,6 +19,7 @@ from backend.app.agent.result import (
     build_error_result,
     build_refusal_result,
     build_risk_result,
+    build_unavailable_result,
     build_vague_result,
     render_text,
 )
@@ -30,6 +31,7 @@ from backend.app.safety.audit import AuditEvent, input_digest, write as write_au
 from backend.app.safety.output_rail import check as check_output
 from backend.app.safety.policy import decide as decide_policy
 from backend.app.safety.rule_engine import final_check  # 最终输出检查
+from backend.app.tools.catalog import DEFAULT_CATALOG
 from backend.app.tools.knowledge_tools import DEPARTMENT_ROUTE
 from backend.app.tools.registry import call_tool as _live_call_tool
 from backend.app.tools.registry import stub_call_tool
@@ -175,6 +177,8 @@ def tool(state: ConsultationState) -> dict:
     tool_name = state.next_tool or KNOWLEDGE_TOOL_NAME
     args = dict(state.next_tool_args or {})
     trace_id = _trace_id()
+    spec = DEFAULT_CATALOG.get(tool_name)
+    tool_scope = spec.scope if spec is not None else "internal"
 
     if not str(args.get("query") or "").strip():
         args["query"] = (
@@ -187,8 +191,12 @@ def tool(state: ConsultationState) -> dict:
     call_count = state.tool_call_count + 1
 
     if not outcome.ok:
-        # 失败也写结构化结果：output 节点看到 error 就走错误分支。
-        results[tool_name] = {"error": outcome.error, "error_kind": outcome.error_kind}
+        # 失败也写结构化结果：output 节点按 scope 决定是硬错误还是降级。
+        results[tool_name] = {
+            "error": outcome.error,
+            "error_kind": outcome.error_kind,
+            "scope": tool_scope,
+        }
         return {
             "tool_results": results,
             "tool_call_count": call_count,
@@ -229,8 +237,8 @@ def output(state: ConsultationState) -> dict:
     """输出节点：生成结构化结果，渲染文案，最终检查边界。"""
     tool_error = next(
         (
-            result["error"]
-            for result in state.tool_results.values()
+            (name, result)
+            for name, result in state.tool_results.items()
             if isinstance(result, dict) and result.get("error")
         ),
         None,
@@ -245,8 +253,16 @@ def output(state: ConsultationState) -> dict:
         else:  # 明确风险 → 固定提示
             structured = build_risk_result(rule)
     elif tool_error:
-        # 工具节点报告了异常时，输出统一的结构化 error 结果。
-        structured = build_error_result(tool_error)
+        name, error = tool_error
+        # 外部只读工具超时/不可用不该把整轮问诊打成 error：
+        # 主流程降级为“暂无依据”，内部工具失败仍然照常报错。
+        if error.get("scope") == "external" and error.get("error_kind") in {
+            "timeout",
+            "unavailable",
+        }:
+            structured = build_unavailable_result(name)
+        else:
+            structured = build_error_result(error["error"])
     else:  # 正常路径 → 已知、未知、工具、下一步
         structured = build_completed_result(
             state.collected_facts, state.missing_fields, state.tool_results

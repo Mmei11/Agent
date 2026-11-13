@@ -254,7 +254,7 @@
 
 ### Phase C｜工具运行时与 MCP client（5–7 天）
 
-> 进展（2026-11-13）：MCP client 的 stdio 与 streamable HTTP 通道均已落地；`mcp_server` 支持 `--http` 入口，HTTP 集成测试走真实 uvicorn 往返。外部工具默认关闭，白名单 fail-close，只以 read_only/external 注册。下一步：外部工具运行时评测（超时降级到"暂无依据"）与 `red_flag_lookup` 的真实场景。
+> 进展（2026-11-13）：Phase C 验收项已全部落地——工具目录与风险分级、决策层选工具与预算、工具结果摘要（≤400 字）、stdio/HTTP MCP client、`red_flag_lookup` 红旗科普场景、外部工具失败降级“暂无依据”。剩余两项低优先级回滚开关未做：`tool_results` 按调用序号记历史、`TOOL_RUNTIME=legacy`。
 
 **工程问题：** 工具契约已经很完整，但决策层不会选工具、不会传参数；外部 MCP 工具没有入口；工具结果没有摘要；多个工具之间没有调用预算。
 

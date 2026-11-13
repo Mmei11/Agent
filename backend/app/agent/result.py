@@ -12,7 +12,7 @@ class ConsultationResult(BaseModel):
     - error：工具失败或输出校验没过
     """
 
-    status: str  # completed / risk_route / error
+    status: str  # completed / risk_route / refused / error / degraded
     known_facts: dict = {}  # 已收集的字段，{"主要症状": ["头部不适"], ...}
     unknowns: list = []  # 仍不确定的字段名，["已知背景"]
     tools_used: list = []  # 调过的工具名，["department_route"]
@@ -114,6 +114,16 @@ def build_error_result(reason: str) -> dict:
     result = ConsultationResult(
         status="error",
         next_step=f"处理出错：{reason}",  # 把出错原因放进 next_step
+    )
+    return result.model_dump()
+
+
+def build_unavailable_result(tool_name: str) -> dict:
+    """外部只读工具不可用：降级为"暂无依据"，不把整轮问诊变成错误。"""
+    result = ConsultationResult(
+        status="degraded",
+        tools_used=[tool_name],
+        next_step="暂时无法获取外部知识依据，建议结合实际情况就诊。",
     )
     return result.model_dump()
 

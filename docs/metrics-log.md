@@ -537,3 +537,13 @@
 - 集成测试启动真实 uvicorn MCP server，验证 HTTP 工具发现、调用往返、注册进目录后的 `prompt_entries` 与执行
 - 失败路径：连接失败包装成 `MCPClientError`；外部工具超时在契约层映射为 `error_kind="timeout"`
 - 单测：563 passed + 6 skipped（新增 8 条 HTTP 相关测试）
+
+**2026-11-13 · Phase C 第 7 课：红旗科普路径与外部工具降级**
+
+- `general.is_red_flag_question` 识别“什么情况要急诊 / 有哪些危险信号 / 算不算红旗”，与就医准备问题分开
+- `opening.answer_red_flags` 确定性调用 `red_flag_lookup`，最多列出三条警示；`answer_followup` 同步接入
+- 专用 `red_flag_answer_is_safe`：允许正文出现危险词，但拒绝处方表达和“不用担心/没有危险”的安抚结论；查不到时 fail-close
+- 风险分流仍由 rule_engine 在更早节点完成，工具结果不写 `risk_flags`
+- 外部工具失败：tool 节点记录 `scope`；output 对外部只读工具的 timeout/unavailable 降级为 `status=degraded`（“暂无依据”），内部工具失败仍保持 error
+- M7 mock：**1.000**（新增 red_flag 组；department/guideline/risk 保持全对）
+- 单测：579 passed + 6 skipped（新增 16 条）

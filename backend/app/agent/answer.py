@@ -18,9 +18,10 @@ from backend.app.agent.general import (
     general_answer_is_safe,
     is_date_question,
     is_guideline_question,
+    is_red_flag_question,
 )
 from backend.app.agent.memory_ref import is_memory_reference
-from backend.app.agent.opening import answer_guideline
+from backend.app.agent.opening import answer_guideline, answer_red_flags
 from backend.app.agent.router import route as route_reply
 from backend.app.agent.session_info import (
     build_answer as build_session_info_answer,
@@ -399,6 +400,10 @@ def answer_followup(state: ConsultationState) -> dict:
 
     if not memory_reference and is_date_question(state.latest_user_message):
         return _date_answer(state)
+
+    # 红旗科普类追问：先于就医准备，允许列出危险信号但不给安抚结论。
+    if not memory_reference and is_red_flag_question(state.latest_user_message):
+        return answer_red_flags(state, node="answer")
 
     # 就医准备类追问：走确定性工具，不交给模型常识。
     if not memory_reference and is_guideline_question(state.latest_user_message):

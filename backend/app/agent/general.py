@@ -46,6 +46,47 @@ def is_guideline_question(message: str) -> bool:
     return any(pattern.search(text) for pattern in GUIDELINE_PATTERNS)
 
 
+# 红旗科普类问题：问的是"什么情况要急诊/有哪些危险信号"，
+# 不是描述自己的症状。这类问题可以调用 red_flag_lookup 列出警示，
+# 但不能反过来判定用户"没有风险"。
+RED_FLAG_PATTERNS = (
+    re.compile(
+        r"(什么|哪些|哪种)[^。！？\n]{0,8}(情况|症状|表现)[^。！？\n]{0,12}"
+        r"(立即|马上|赶紧|急诊|就医|去医院|危险)"
+    ),
+    re.compile(r"(危险信号|红旗|预警信号|紧急情况)"),
+    re.compile(r"(需要|要)[^。！？\n]{0,4}(立即|马上)[^。！？\n]{0,4}(就医|去医院|急诊)"),
+    re.compile(r"(算不算|是不是)[^。！？\n]{0,8}(危险|红旗|急诊|紧急)"),
+)
+
+RED_FLAG_FALLBACK = (
+    "暂时无法确认具体的危险信号；如出现明显不适或症状加重，请及时就医。"
+)
+
+# 红旗科普允许出现"胸痛、意识不清"这类词，所以不能复用 general_answer_is_safe
+# 的 screen 闸门；这里只挡住处方类表达和安抚性结论。
+RED_FLAG_REASSURANCE = ("不用担心", "没有危险", "无需就医", "不用就医", "可以观察")
+
+
+def is_red_flag_question(message: str) -> bool:
+    """判断是否在问"什么情况算危险/要急诊"。"""
+    text = (message or "").strip()
+    if not text:
+        return False
+    return any(pattern.search(text) for pattern in RED_FLAG_PATTERNS)
+
+
+def red_flag_answer_is_safe(text: str) -> bool:
+    text = text.strip()
+    if not 5 <= len(text) <= 300:
+        return False
+    if any(pattern.search(text) for pattern in UNSAFE_GENERAL_PATTERNS):
+        return False
+    if any(phrase in text for phrase in RED_FLAG_REASSURANCE):
+        return False
+    return "立即就医" in text or "及时就医" in text
+
+
 def display_now() -> datetime:
     return datetime.now(DISPLAY_TZ)
 

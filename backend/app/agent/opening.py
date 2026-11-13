@@ -9,8 +9,11 @@ import os
 from backend.app.agent.followup import REPLY_OPTIONS
 from backend.app.agent.general import (
     GENERAL_FALLBACK,
+    RED_FLAG_FALLBACK,
     general_answer_is_safe,
     is_guideline_question,
+    is_red_flag_question,
+    red_flag_answer_is_safe,
 )
 from backend.app.agent.router import route as route_reply
 from backend.app.agent.state import ConsultationState
@@ -44,7 +47,7 @@ def _usage_dict(usage: LLMResult | None) -> dict:
     }
 
 
-def _guideline_query(state: ConsultationState) -> str:
+def _tool_query(state: ConsultationState) -> str:
     facts = []
     for values in (state.collected_facts or {}).values():
         if isinstance(values, list):
@@ -60,7 +63,7 @@ def answer_guideline(state: ConsultationState, *, node: str = "general_route") -
     这类问题应走 general，但答案不能靠模型常识编；工具结果作为唯一依据，
     查不到就明说，不拿最相近的一条凑数。
     """
-    query = _guideline_query(state)
+    query = _tool_query(state)
     outcome = call_tool("guideline_retrieve", {"query": query})
     hits = ((outcome.data or {}).get("hits") or []) if outcome.ok else []
 
@@ -114,8 +117,74 @@ def answer_guideline(state: ConsultationState, *, node: str = "general_route") -
     }
 
 
+def answer_red_flags(state: ConsultationState, *, node: str = "general_route") -> dict:
+    """红旗科普：调用 red_flag_lookup 列出警示，不做“你没有风险”的结论。
+
+    这是 red_flag_lookup 在图上唯一的合法场景：用户主动问“什么情况要急诊”。
+    风险分流仍由 rule_engine 更早完成，工具结果不写 risk_flags。
+    """
+    query = _tool_query(state)
+    outcome = call_tool("red_flag_lookup", {"query": query})
+    hits = ((outcome.data or {}).get("hits") or []) if outcome.ok else []
+
+    if hits:
+        lines = ["出现以下情况请立即就医或拨打急救电话："]
+        for hit in hits[:3]:
+            content = str(hit.get("content") or hit.get("title") or "").strip()
+            if content:
+                lines.append(f"- {content[:60]}")
+        lines.append("以上是通用警示，不代表对你当前情况的判断；症状明显或加重时请及时就医。")
+        text = "\n".join(lines)
+    else:
+        # 查不到不等于安全：这里只退回通用提示，不给任何安抚性结论。
+        text = RED_FLAG_FALLBACK
+
+    if not red_flag_answer_is_safe(text):
+        text = RED_FLAG_FALLBACK
+
+    scope = current_trace()
+    trace_id = scope.trace_id if scope else ""
+    tool_data = (
+        outcome.data
+        if outcome.ok
+        else {"error": outcome.error, "error_kind": outcome.error_kind}
+    )
+    return {
+        "next_action": "GENERAL",
+        "rendered_text": text,
+        "conversation": [{"role": "agent", "text": text}],
+        "suggested_replies": [],
+        "tool_results": {"red_flag_lookup": tool_data},
+        "tool_call_count": state.tool_call_count + 1,
+        "trace": [
+            {
+                "node": node,
+                "source": "general",
+                # 路径标记：走的是红旗科普，不是风险命中；真实命中在 risk_flags。
+                "red_flag_qa": True,
+                "tool": "red_flag_lookup",
+                "tool_ok": outcome.ok,
+                "hits": len(hits),
+                "trace_id": trace_id,
+            },
+            {
+                "node": "tool",
+                "called": "red_flag_lookup",
+                "args_keys": ["query"],
+                "ok": outcome.ok,
+                "latency_ms": outcome.latency_ms,
+                "trace_id": trace_id,
+            },
+        ],
+    }
+
+
 def route_general(state: ConsultationState) -> dict:
     """普通 → 直接回答并结束本轮；医疗 → 回到 decision。"""
+    # 红旗科普优先：它比就医准备更安全敏感，先判它。
+    if is_red_flag_question(state.latest_user_message):
+        return answer_red_flags(state, node="general_route")
+
     # 就医准备类问题先走确定性工具，不依赖模型是否把它判成普通问题。
     if is_guideline_question(state.latest_user_message):
         return answer_guideline(state, node="general_route")
