@@ -560,3 +560,12 @@
 - 摘要安全：独立译文闸门允许包装规格，拦用法用量与建议；摘要过长或改成英文会被拒绝
 - 健康科普：MedlinePlus 命中的首条会抓取页面正文，再用模型生成 2–3 句中文摘要（定义/表现/预防）；抓取或摘要失败时退回搜索片段
 - 单测：**625 passed**（本机 pgvector 在线；CI 无库时为 619 + 6 skipped）
+
+**2026-11-13 · Phase D 第 1 课：技能包、注册表与规则路由**
+
+- 新增 `skills/default|headache|pediatric_fever/`：每个技能包含 `manifest.yaml` 与按需加载的 `SKILL.md`
+- `skills/schema.py`：SkillManifest 校验 required_fields、追问优先级和模板覆盖；坏技能跳过
+- `backend/app/skills/registry.py`：只扫描 manifest 导出摘要，`SKILL.md` 在选中后才读；default 缺失时用代码内兜底
+- `backend/app/skills/router.py`：关键词命中 + priority 决胜；`SKILLS_ENABLED=0` 直接回退 default
+- M9：6 条 dev 样本全部命中，准确率 **1.000**（headache 3、pediatric_fever 3）
+- 单测：**639 passed**（新增 14 条技能测试）

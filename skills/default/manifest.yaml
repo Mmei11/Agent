@@ -1,0 +1,43 @@
+name: default
+title: 通用问诊
+description: 未命中特定病种时的通用六字段问诊，保持现有行为
+priority: 999
+when_to_use: []
+required_fields:
+  - 主要症状
+  - 持续时间
+  - 部位
+  - 程度
+  - 伴随表现
+  - 已知背景
+optional_fields:
+  - 加重缓解因素
+  - 时间模式
+  - 测量值
+followup_priority:
+  - 主要症状
+  - 持续时间
+  - 部位
+  - 伴随表现
+  - 程度
+  - 已知背景
+question_templates:
+  主要症状: 请问主要的不适是什么？
+  持续时间: 请问这种情况持续多久了？
+  部位: 请问具体在哪个部位？
+  伴随表现: 请问还有其他不适吗？
+  程度: 请问不适的程度如何，是轻微、明显还是严重？
+  已知背景: 请问有没有既往病史或正在用药？
+reply_options:
+  主要症状: [头部不适, 腹痛, 发热]
+  持续时间: [一天内, 两三天, 一周以上]
+  部位: [头部, 腹部, 胸部]
+  伴随表现: [没有其他不适, 有恶心, 有乏力]
+  程度: [轻微, 明显, 严重]
+  已知背景: [无病史, 有慢性病, 正在用药]
+tools:
+  - department_route
+  - red_flag_lookup
+  - guideline_retrieve
+output_template: |
+  建议就诊方向：{department}

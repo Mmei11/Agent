@@ -56,6 +56,9 @@ ALLOWED_NAMES = {
     # Phase C：MCP 外部工具。默认关闭；白名单为空等于全部拒绝。
     "MCP_ENABLED",
     "MCP_SERVERS",
+    # Phase D：技能层。SKILLS_ENABLED=0 时只保留 default 技能。
+    "SKILLS_ENABLED",
+    "SKILLS_DIR",
     # 本地轨迹
     "TRACE_SINK",
     "TRACE_PATH",
