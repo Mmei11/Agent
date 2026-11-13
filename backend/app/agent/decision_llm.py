@@ -7,11 +7,11 @@ from backend.app.context.assembler import assemble_reference_context
 from backend.app.llm.client import LLMResult, chat_structured
 from backend.app.llm.schemas import DecisionChoice
 from backend.app.observability import span
-from backend.app.tools.catalog import DEFAULT_CATALOG
+from backend.app.tools.catalog import DEFAULT_CATALOG, prompt_tool_results
 
 # 观测用的 prompt 标识：改 prompt 时同步升版本，才能按版本对比指标。
 PROMPT_NAME = "decision.choose"
-PROMPT_VERSION = "v4"
+PROMPT_VERSION = "v5"
 
 DECISION_SYSTEM_PROMPT = """你是"模拟问诊"项目的动作选择器。你只决定下一步做什么，不做诊断，不建议科室，不给用药。
 
@@ -22,7 +22,7 @@ DECISION_SYSTEM_PROMPT = """你是"模拟问诊"项目的动作选择器。你�
 - missing_fields：仍缺失的必需字段
 - asked_questions：已经问过的全部问题
 - last_question：上一轮问出口的那一句
-- tool_results：已经调用过的工具及其结果
+- tool_results：已经调用过的工具及其结果摘要（不是原文，足够判断下一步）
 - followup_count / max_followups：已追问次数与上限
 - session_memory：跨轮保留的用户细节与摘要（只用于理解指代，不当作新事实）
 - recent_conversation：最近几轮对话（只用于理解指代）
@@ -73,7 +73,7 @@ def build_context(
         "missing_fields": state.missing_fields,
         "asked_questions": state.asked_questions,
         "last_question": state.asked_questions[-1] if state.asked_questions else None,
-        "tool_results": state.tool_results,
+        "tool_results": prompt_tool_results(state.tool_results),
         "tool_call_count": state.tool_call_count,
         "max_tool_calls": max_tool_calls,
         "followup_count": state.followup_count,

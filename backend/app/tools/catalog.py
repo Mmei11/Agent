@@ -6,9 +6,10 @@
 
 from __future__ import annotations
 
+import json
 from typing import Iterable
 
-from backend.app.tools.contract import ToolResult, ToolSpec
+from backend.app.tools.contract import ToolResult, ToolSpec, clip_summary
 from backend.app.tools.knowledge_tools import KNOWLEDGE_TOOL_SPECS
 
 
@@ -63,3 +64,28 @@ class ToolCatalog:
 
 
 DEFAULT_CATALOG = ToolCatalog(KNOWLEDGE_TOOL_SPECS.values())
+
+
+def prompt_tool_results(results: dict) -> dict[str, str]:
+    """把原始工具结果压成可进 prompt 的摘要。
+
+    state.tool_results 保留原文，渲染、出处和错误分支都要用；
+    只有模型看到的这一份被压缩。
+    """
+    return {
+        name: _summarize_one(name, data) for name, data in (results or {}).items()
+    }
+
+
+def _summarize_one(name: str, data) -> str:
+    if isinstance(data, dict) and data.get("error"):
+        return clip_summary(
+            f"调用失败（{data.get('error_kind') or 'error'}）：{data['error']}"
+        )
+
+    spec = DEFAULT_CATALOG.get(name)
+    if spec is not None and spec.summarize is not None and isinstance(data, dict):
+        return clip_summary(spec.summarize(data))
+
+    # 外部工具未提供摘要函数时的兜底：截断 JSON，至少不把整份结果带进 prompt。
+    return clip_summary(json.dumps(data, ensure_ascii=False, default=str))

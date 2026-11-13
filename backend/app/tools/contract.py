@@ -26,6 +26,17 @@ ToolRisk = Literal["read_only", "write", "sensitive"]
 # 作用域决定工具在哪里运行：进程内实现，还是通过 MCP 接到外部服务。
 ToolScope = Literal["internal", "external"]
 
+# 工具结果进模型上下文前的字数上限。原始结果仍完整留在 state 里给渲染和审计用。
+TOOL_SUMMARY_MAX_CHARS = 400
+
+
+def clip_summary(text: str, limit: int = TOOL_SUMMARY_MAX_CHARS) -> str:
+    """按字符数截断摘要，留一个省略号表示后面还有内容。"""
+    text = str(text).strip()
+    if len(text) <= limit:
+        return text
+    return text[: limit - 1].rstrip() + "…"
+
 
 @dataclass(frozen=True)
 class ToolResult:
@@ -52,6 +63,8 @@ class ToolSpec:
     empty_result_mode: EmptyResultMode = "fail-open"
     risk_class: ToolRisk = "read_only"
     scope: ToolScope = "internal"
+    # 把原始结果压成进 prompt 的摘要。None 时由目录用通用 JSON 截断兜底。
+    summarize: Callable[[dict], str] | None = None
 
     @property
     def auto_callable(self) -> bool:

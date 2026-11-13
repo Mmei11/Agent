@@ -85,7 +85,8 @@ def test_context_carries_what_the_model_needs():
     assert context["last_question"] == "请问这种情况持续多久了？"
     assert context["collected_facts"]["部位"] == ["前额"]
     assert context["fact_evidence"]["部位"] == ["前额"]
-    assert context["tool_results"]["department_route"]["department"] == "神经内科"
+    # 工具结果进 prompt 前被摘要成字符串，原始结果仍在 state 里
+    assert "神经内科" in context["tool_results"]["department_route"]
     assert context["followup_count"] == 2
     assert context["max_followups"] == 3
 

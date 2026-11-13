@@ -509,3 +509,12 @@
 - M7 mock：**1.000**（department 3/3、guideline 3/3、risk 2/2，unreachable 0）
 - M7 模型：**1.000**（10/10；department、general、guideline、risk 全部正确，unreachable 0、危险误调 0）
 - 第二次模型复测：**1.000**（两次独立运行一致，稳定性确认）
+
+**2026-11-13 · Phase C 第 4 课：工具结果摘要**
+
+- `ToolSpec` 新增 `summarize` 字段；`contract.clip_summary` 统一 400 字上限，省略号表示截断
+- 三个知识工具各写摘要函数：科室保留方向/依据/出处/命中数；红旗保留“不确定≠安全”；指南最多三条要点
+- 新增 `catalog.prompt_tool_results`：在装配 prompt 时压缩，失败结果变成“调用失败（timeout/unavailable）”
+- `state.tool_results` 保持原文，渲染、出处与错误分支不受影响；只有模型看到摘要
+- 用真实知识条目实测：department 1010 → 42 字（24x）、guideline 909 → 136 字（6.7x）、red_flag 975 → 42 字（23x）
+- 单测：539 passed + 6 skipped（新增 8 条摘要测试）

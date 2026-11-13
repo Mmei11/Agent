@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 
 from backend.app.knowledge.retrieval import retrieve
 from backend.app.knowledge.schema import Source, load_sources
-from backend.app.tools.contract import ToolSpec
+from backend.app.tools.contract import ToolSpec, clip_summary
 
 # 工具名只在这里写一次，别的模块引用常量，避免字符串写错了才发现
 DEPARTMENT_ROUTE = "department_route"
@@ -53,6 +53,55 @@ def _hit_payload(hit, sources: dict[str, Source]) -> dict:
             "verified": source.verified if source else False,
         },
     }
+
+
+def _source_note(hit: dict) -> str:
+    source = hit.get("source") or {}
+    title = source.get("title") or source.get("id") or "未注明出处"
+    return f"{title}（{'已核实' if source.get('verified') else '未核实'}）"
+
+
+def summarize_department(data: dict) -> str:
+    """科室工具的信号是方向和出处；正文留给渲染层，不进 prompt。"""
+    department = data.get("department")
+    hits = data.get("hits") or []
+    if department is None and not hits:
+        return "科室方向：未命中（no_match），不要臆造科室。"
+
+    top = hits[0] if hits else {}
+    detail = (
+        f"首要依据：{top.get('title') or top.get('id')}；"
+        f"出处：{_source_note(top)}；命中 {len(hits)} 条。"
+        if hits
+        else "无命中条目，只说明已知方向。"
+    )
+    return clip_summary(f"科室方向：{department or top.get('department')}；{detail}")
+
+
+def summarize_red_flag(data: dict) -> str:
+    """红旗工具的信号是“不确定也算一种结果”，摘要必须保留这层含义。"""
+    hits = data.get("hits") or []
+    if not hits:
+        return "红旗检索：未命中；状态不确定，不等于安全。"
+
+    titles = "；".join(str(hit.get("title") or hit.get("id")) for hit in hits[:3])
+    return clip_summary(
+        f"红旗检索：命中 {len(hits)} 条（{titles}）；仅作提示，不改变风险等级。"
+    )
+
+
+def summarize_guideline(data: dict) -> str:
+    """就医指引的信号是具体条目要点，最多保留三条，每条单独截断。"""
+    hits = data.get("hits") or []
+    if not hits:
+        return "就医指引：未命中（no_match），不要拿相近条目凑数。"
+
+    lines = ["就医指引："]
+    for hit in hits[:3]:
+        content = str(hit.get("content") or hit.get("title") or "").strip()
+        if content:
+            lines.append(f"- {clip_summary(content, 100)}")
+    return clip_summary("\n".join(lines))
 
 
 def _search(query: str, category: str, top_k: int, risk_level: str | None = None) -> list[dict]:
@@ -99,6 +148,7 @@ KNOWLEDGE_TOOL_SPECS = {
         empty_result_mode="fail-open",
         risk_class="read_only",
         scope="internal",
+        summarize=summarize_department,
     ),
     "red_flag_lookup": ToolSpec(
         name="red_flag_lookup",
@@ -109,6 +159,7 @@ KNOWLEDGE_TOOL_SPECS = {
         empty_result_mode="fail-close",
         risk_class="read_only",
         scope="internal",
+        summarize=summarize_red_flag,
     ),
     "guideline_retrieve": ToolSpec(
         name="guideline_retrieve",
@@ -119,5 +170,6 @@ KNOWLEDGE_TOOL_SPECS = {
         empty_result_mode="fail-open",
         risk_class="read_only",
         scope="internal",
+        summarize=summarize_guideline,
     ),
 }
