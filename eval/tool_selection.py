@@ -262,16 +262,17 @@ def write_report(
         "",
         "## 怎么读",
         "",
-        "- `guideline` 类在 Phase C 之前会全部不可达：图只会调 `department_route`。",
-        "  这不是模型选错，而是决策 schema 还没有 `tool_name`。",
+        "- `guideline` 类现在走确定性 `guideline_retrieve` 路径；Phase C 之前它不可达。",
         "- `risk` 类期望工具为 null：红旗由规则层在 decision 之前短路，不应进入工具节点。",
         "- `general` 类需要模型路由，mock 模式跳过。",
-        "- 参数正确性（`tool_args`）留到 Phase C；当前参数由代码拼接，不是模型生成。",
+        "- `red_flag_lookup` 仍由规则层优先处理；正常问诊不应依赖它替代风险分流。",
+        "- `tool_args` 的参数正确性还没有单独评分，当前只记录工具名是否选对。",
         "",
         "## 局限",
         "",
         "- 样本是虚构场景，覆盖的是“该不该调哪个工具”，不是临床正确性。",
-        "- 当前只有 1/3 的工具可达，选择正确率的上限由结构决定，不能当作模型能力结论。",
+        "- 三个只读工具现已接入；选择正确率不再受“只有 1/3 可达”的结构上限约束。",
+        "- 单次运行有波动；阶段末应重复 3 次确认稳定性。",
     ]
 
     report_path = output_dir / "tool-selection-report.md"

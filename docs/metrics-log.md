@@ -479,3 +479,33 @@
   - 第 20 轮（腹部/三天）：`summary=✓ / facts=✓`
 - 结论：LS01 dev **3/3**、LS02 holdout **3/3**；滚动摘要在 20–24 轮会话里按预期工作
 - 注意：均为单次运行；阶段末仍需重复 3 次确认稳定性
+
+**2026-11-12 · Phase C 第 1 课：工具目录与风险分级**
+
+- `ToolSpec` 增加 `risk_class`（`read_only` / `write` / `sensitive`）、`scope`（`internal` / `external`）和派生属性 `auto_callable`
+- `tool_schema` 同步暴露三个字段；MCP 的 `inputSchema` 不受影响
+- 新增 `backend/app/tools/catalog.py`：注册、查询、只读过滤、`prompt_entries`、未注册工具的结构化失败
+- 三个知识工具显式声明 `read_only` / `internal`
+- 单测：515 passed（新增 7 条目录测试）
+- M7 基线暂不变：决策 schema 还没有 `tool_name`，模型仍不能选工具
+
+**2026-11-12 · Phase C 第 2 课：决策层选工具与图内通用执行**
+
+- `DecisionChoice` 增加 `tool_name` / `tool_args`；decision prompt 升到 v4，注入只读工具目录
+- `decision.py` 新增 `rule_decision` / `gate_decision` / `validate_decision`；旧的 `rule_action` / `validate_action` 保留，避免破坏既有测试
+- 校验规则：未知工具回退默认、重复工具收束、单轮最多 3 次、`write` / `sensitive` 拒绝自动调用
+- `state` 增加 `next_tool` / `next_tool_args` / `tool_call_count`；intake 每轮重置
+- graph 的 tool 节点改为按工具名与参数执行，trace 记录 `called` / `args_keys`
+- 单测：525 passed；M7 mock 仍为 0.625（规则路径只调 `department_route`）
+- M7 模型复测进行中
+
+**2026-11-12 · Phase C 第 3 课：就医准备走确定性工具路径**
+
+- 新增 `general.is_guideline_question`：识别“就诊前要带什么 / 挂号流程 / 第一次去医院”等问题
+- `opening.answer_guideline` 在 general 路径里直接调用 `guideline_retrieve`，用检索结果组织回答；查不到就明说，不拿相近条目凑数
+- 该路径在模型路由之前执行，mock 模式也能调工具；`answer_followup` 也接入了同一路径
+- trace 同时记录 `general_route` / `answer` 与 `tool` 两个条目，M7 能读到实际工具调用
+- 单测：537 passed（新增 12 条就医准备路径测试）
+- M7 mock：**1.000**（department 3/3、guideline 3/3、risk 2/2，unreachable 0）
+- M7 模型：**1.000**（10/10；department、general、guideline、risk 全部正确，unreachable 0、危险误调 0）
+- 第二次模型复测：**1.000**（两次独立运行一致，稳定性确认）

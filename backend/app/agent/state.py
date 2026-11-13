@@ -68,6 +68,13 @@ class ConsultationState(BaseModel):
     risk_flags: list = []  # 每轮风险筛查覆盖上轮结果
     tool_results: dict = {}
 
+    # --- Phase C：本轮工具调度 ---
+    # decision 写入待执行工具与参数，tool 节点执行后清空。
+    next_tool: str = ""
+    next_tool_args: dict = {}
+    # 本轮已调用工具次数；intake 每轮重置，用于单轮调用预算。
+    tool_call_count: int = 0
+
     # next_action：决策节点选出的动作
     next_action: str = ""
 

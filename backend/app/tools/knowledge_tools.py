@@ -97,6 +97,8 @@ KNOWLEDGE_TOOL_SPECS = {
         handler=department_route,
         timeout_s=8.0,
         empty_result_mode="fail-open",
+        risk_class="read_only",
+        scope="internal",
     ),
     "red_flag_lookup": ToolSpec(
         name="red_flag_lookup",
@@ -105,6 +107,8 @@ KNOWLEDGE_TOOL_SPECS = {
         handler=red_flag_lookup,
         timeout_s=5.0,
         empty_result_mode="fail-close",
+        risk_class="read_only",
+        scope="internal",
     ),
     "guideline_retrieve": ToolSpec(
         name="guideline_retrieve",
@@ -113,5 +117,7 @@ KNOWLEDGE_TOOL_SPECS = {
         handler=guideline_retrieve,
         timeout_s=5.0,
         empty_result_mode="fail-open",
+        risk_class="read_only",
+        scope="internal",
     ),
 }

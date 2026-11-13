@@ -422,7 +422,7 @@ uv run python -m eval.context_retention --split holdout
 
 **定义**：在一组需要不同工具的单轮场景上，系统实际调用的工具是否与期望一致。
 
-**当前结构约束**：图的 tool 节点写死只调用 `department_route`，决策 schema 也没有 `tool_name` / `tool_args`。因此 M7 的当前上限不是“模型选不对”，而是“另外两个工具根本不可达”。这个指标在 Phase C 之前只记录基线，不设门禁。
+**结构说明**：Phase C 之前 tool 节点写死只调 `department_route`，决策 schema 也没有 `tool_name` / `tool_args`。现在已改为按工具目录执行，decision 输出 `tool_name` / `tool_args`；旧基线保留用于对比。
 
 **样本**：`eval/probes/tool_selection.jsonl`（Phase A 建立，覆盖三类）
 
@@ -468,7 +468,15 @@ uv run python -m eval.context_retention --split holdout
 - 唯一的失败是 `guideline_retrieve` 3/3 不可达，全部由“图只会调 department_route”造成，不是模型选错。
 - 首轮模型基线曾出现科室类 1/3：两条停在追问，原因是样本用了“没有其他不适”这种否定式伴随表现，被模型抽取丢掉。改成阳性伴随症状（“伴有恶心/乏力”）后恢复到 3/3。这说明 `blocked_by_intake` 这一列有必要。
 
-参数正确性（`tool_args`）留到 Phase C 一起测；当前参数由代码拼接，不是模型生成，单独测没有意义。
+**Phase C 后（2026-11-12）**
+
+- 决策层可输出 `tool_name` / `tool_args`；tool 节点按目录执行，单轮最多 3 次。
+- 就医准备问题新增确定性 `guideline_retrieve` 路径，在 general 路由之前执行，mock 模式也能调工具。
+- mock（dev 8 有效 + 2 条 general 跳过）：**1.000**；department 3/3、guideline 3/3、risk 2/2，`unreachable=0`。
+- 模型模式（dev 10 条）：**1.000**；department 3/3、general 2/2、guideline 3/3、risk 2/2，`unreachable=0`、危险误调 0。连续两次独立运行均为 1.000。
+- `tool_args` 现在由模型生成并由参数 Schema 校验；参数正确性可以后续加专项样本。
+
+参数正确性（`tool_args`）单独测的话，建议等 MCP client 接入后一起做；当前三个知识工具的参数都只有一个 `query`。
 
 **目标（Phase C 后）**：`selection_accuracy ≥ 0.90`，`dangerous_misuse = 0`。
 

@@ -29,6 +29,22 @@ UNSAFE_GENERAL_PATTERNS = (
     re.compile(r"抑郁症|焦虑症|精神疾病|心理疾病"),
 )
 
+# 就医准备类问题：这类问题该走 general，但需要调用 guideline_retrieve，
+# 不能只靠模型常识回答。
+GUIDELINE_PATTERNS = (
+    re.compile(r"(就诊|就医|去医院|挂号|门诊)[^。！？\n]{0,12}(准备|带|材料|资料|流程|手续)"),
+    re.compile(r"(准备|带)[^。！？\n]{0,8}(什么|哪些)[^。！？\n]{0,6}(材料|资料|东西)"),
+    re.compile(r"第一次[^。！？\n]{0,6}(医院|就诊|看病)"),
+)
+
+
+def is_guideline_question(message: str) -> bool:
+    """判断是否在问就医准备/挂号流程。"""
+    text = (message or "").strip()
+    if not text:
+        return False
+    return any(pattern.search(text) for pattern in GUIDELINE_PATTERNS)
+
 
 def display_now() -> datetime:
     return datetime.now(DISPLAY_TZ)

@@ -185,6 +185,10 @@ def intake(state: ConsultationState) -> dict:
         "collected_facts": collected,
         "fact_evidence": evidence,
         "missing_fields": missing,
+        # 新的一轮开始，工具调度与单轮预算归零；历史工具结果保留。
+        "next_tool": "",
+        "next_tool_args": {},
+        "tool_call_count": 0,
         "turn_kind": "followup" if continuing else "consultation",
         # 新的一轮开始，上一轮的追问选项作废。
         "suggested_replies": [],

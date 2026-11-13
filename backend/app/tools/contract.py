@@ -17,6 +17,15 @@ FailureKind = Literal["invalid_params", "timeout", "unavailable"]
 # 查不到不等于"没有风险"，只能当作"不确定"往保守方向走。
 EmptyResultMode = Literal["fail-close", "fail-open"]
 
+# 风险等级决定“能不能让模型自动调”：
+# - read_only：只读查询，可以自动调；
+# - write：会改变外部状态，必须人工确认；
+# - sensitive：涉及身份、支付、定位等，默认不接入。
+ToolRisk = Literal["read_only", "write", "sensitive"]
+
+# 作用域决定工具在哪里运行：进程内实现，还是通过 MCP 接到外部服务。
+ToolScope = Literal["internal", "external"]
+
 
 @dataclass(frozen=True)
 class ToolResult:
@@ -41,6 +50,13 @@ class ToolSpec:
     timeout_s: float = 5.0
     idempotent: bool = True
     empty_result_mode: EmptyResultMode = "fail-open"
+    risk_class: ToolRisk = "read_only"
+    scope: ToolScope = "internal"
+
+    @property
+    def auto_callable(self) -> bool:
+        """只有只读工具允许被模型自动选择；写入/敏感工具必须人工确认。"""
+        return self.risk_class == "read_only"
 
     def call(self, raw_params: dict) -> ToolResult:
         """校验参数 → 限时执行 → 归一化。三类失败分开报，不混成一个 error 字符串。"""
@@ -98,4 +114,7 @@ def tool_schema(spec: ToolSpec) -> dict:
         "timeout_s": spec.timeout_s,
         "idempotent": spec.idempotent,
         "empty_result_mode": spec.empty_result_mode,
+        "risk_class": spec.risk_class,
+        "scope": spec.scope,
+        "auto_callable": spec.auto_callable,
     }

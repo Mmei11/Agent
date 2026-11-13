@@ -6,9 +6,11 @@ from langgraph.graph import END, START, StateGraph  # LangGraph 图的组件
 
 # 从 decision.py 导入决策相关函数
 from backend.app.agent.decision import (
+    Decision,  # 决策结果（动作 + 工具 + 参数）
     choose_auto,  # 模型决策，未启用或失败时回退规则
-    gate_by_confidence,  # 置信度不足时收回决定权
-    validate_action,  # 校验动作能否执行，不能就兜底
+    gate_decision,  # 置信度不足时收回决定权
+    query_from_facts,  # 把已收集字段拼成检索问句
+    validate_decision,  # 校验动作、工具名、参数与预算
 )
 from backend.app.agent.followup import followup, select_next_field  # 追问节点和字段选择
 from backend.app.agent.intake import intake  # 入口节点，提取字段
@@ -113,23 +115,28 @@ def route_after_general(state: ConsultationState) -> str:
 
 
 def decision(state: ConsultationState) -> dict:
-    """决策节点：模型（或规则）选动作，置信度闸门，策略层复核，再由程序校验权限。
+    """决策节点：模型（或规则）选动作和工具，置信度闸门，策略层复核，再由程序校验。
 
     trace 记录模型选了什么、策略层是否覆盖、最终执行什么、是否被降级。
     """
     result = choose_auto(state, MAX_FOLLOWUPS)
-    trusted_choice, downgraded = gate_by_confidence(
-        result.action, result.confidence, state, MAX_FOLLOWUPS
-    )
-    policy_decision = decide_policy(None, state, trusted_choice)
-    final_action = (
-        policy_decision.action
-        if policy_decision.action
-        else validate_action(trusted_choice, state, MAX_FOLLOWUPS)
-    )
+    gated, downgraded = gate_decision(result, state, MAX_FOLLOWUPS)
+    policy_decision = decide_policy(None, state, gated.action)
+
+    base = gated
+    if policy_decision.action:
+        base = Decision(
+            action=policy_decision.action,
+            reason=gated.reason,
+            confidence=gated.confidence,
+        )
+
+    final = validate_decision(base, state, MAX_FOLLOWUPS)
 
     return {
-        "next_action": final_action,  # 最终执行的动作，决定走哪条边
+        "next_action": final.action,  # 最终执行的动作，决定走哪条边
+        "next_tool": final.tool_name,  # CALL_TOOL 时要执行的工具
+        "next_tool_args": final.tool_args,  # 工具参数
         "trace": [
             {
                 "node": "decision",
@@ -138,9 +145,11 @@ def decision(state: ConsultationState) -> dict:
                 "confidence": result.confidence,  # 规则决策为 None
                 "policy_rule": policy_decision.rule,
                 "policy_action": policy_decision.action,
-                "final_action": final_action,  # 策略、闸门和校验后的动作
+                "final_action": final.action,  # 策略、闸门和校验后的动作
+                "tool_name": final.tool_name,  # 最终工具名
+                "tool_args_keys": sorted(final.tool_args),  # 只记参数键，不记值
                 "downgraded_by_confidence": downgraded,  # 是否因低置信度被收回
-                "same": result.action == final_action,  # False 说明被改过
+                "same": result.action == final.action,  # False 说明被改过
                 "model_usage": result.usage,  # token 用量与成本估算，供 M4 统计
                 "trace_id": _trace_id(),
             }
@@ -157,50 +166,39 @@ def route_after_decision(state: ConsultationState) -> str:
     return "output"
 
 
-KNOWLEDGE_TOOL_NAME = DEPARTMENT_ROUTE  # 目前唯一接进图的知识工具
-
-
-def _query_from_facts(collected_facts: dict) -> str:
-    """把已收集的字段拼成一句检索问句。没有事实时返回空串，由调用方处理。"""
-    parts: list[str] = []
-    for values in collected_facts.values():
-        if isinstance(values, list):
-            parts.extend(str(value) for value in values if value)
-        elif values:
-            parts.append(str(values))
-    return " ".join(parts).strip()
+KNOWLEDGE_TOOL_NAME = DEPARTMENT_ROUTE  # 没有模型工具名时的默认工具
 
 
 def tool(state: ConsultationState) -> dict:
-    """工具节点：按契约调用知识工具，把结构化结果写回 state。
-
-    Day 9 直接调注册表里的裸函数；Phase 4 起走 ToolSpec，参数校验、
-    超时和失败分类都由契约层保证。
-    """
+    """工具节点：按决策给出的工具名和参数执行，把结构化结果写回 state。"""
     results = dict(state.tool_results)  # 复制已有工具结果，不改原 state
-    tool_name = KNOWLEDGE_TOOL_NAME
+    tool_name = state.next_tool or KNOWLEDGE_TOOL_NAME
+    args = dict(state.next_tool_args or {})
     trace_id = _trace_id()
 
-    query = _query_from_facts(state.collected_facts)
-    if not query:  # 没有任何事实可查，直接按"无依据"处理，不发请求
-        results[tool_name] = {"department": None, "reason": "no_input", "hits": []}
-        return {
-            "tool_results": results,
-            "trace": [
-                {"node": "tool", "called": tool_name, "ok": True, "trace_id": trace_id}
-            ],
-        }
+    if not str(args.get("query") or "").strip():
+        args["query"] = (
+            query_from_facts(state.collected_facts)
+            or state.latest_user_message.strip()
+            or "就医咨询"
+        )
 
-    outcome = call_tool(tool_name, {"query": query})
+    outcome = call_tool(tool_name, args)
+    call_count = state.tool_call_count + 1
+
     if not outcome.ok:
         # 失败也写结构化结果：output 节点看到 error 就走错误分支。
         results[tool_name] = {"error": outcome.error, "error_kind": outcome.error_kind}
         return {
             "tool_results": results,
+            "tool_call_count": call_count,
+            "next_tool": "",
+            "next_tool_args": {},
             "trace": [
                 {
                     "node": "tool",
                     "called": tool_name,
+                    "args_keys": sorted(args),
                     "ok": False,
                     "error_type": outcome.error_kind,
                     "trace_id": trace_id,
@@ -211,11 +209,14 @@ def tool(state: ConsultationState) -> dict:
     results[tool_name] = outcome.data  # 把结构化结果写回字典
     return {
         "tool_results": results,
-        # 工具返回值已经在 tool_results 里，这里只记调用名与成败。
+        "tool_call_count": call_count,
+        "next_tool": "",
+        "next_tool_args": {},
         "trace": [
             {
                 "node": "tool",
                 "called": tool_name,
+                "args_keys": sorted(args),
                 "ok": True,
                 "latency_ms": outcome.latency_ms,
                 "trace_id": trace_id,

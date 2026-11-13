@@ -62,6 +62,14 @@ class DecisionChoice(BaseModel):
         min_length=1, max_length=200, description="选择这个动作的依据，引用字段或原话片段"
     )
     confidence: float = Field(ge=0, le=1, description="自评置信度，依据不足时如实给低分")
+    tool_name: str | None = Field(
+        default=None,
+        description="action=CALL_TOOL 时，从 tools 清单里选择的工具名；其他动作留空",
+    )
+    tool_args: dict = Field(
+        default_factory=dict,
+        description="action=CALL_TOOL 时的参数对象，必须符合该工具的 input_schema",
+    )
 
 
 class ReplySuggestions(BaseModel):

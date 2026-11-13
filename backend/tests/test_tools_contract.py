@@ -65,6 +65,9 @@ def test_schema_is_declarable():
     assert schema["timeout_s"] == 1.0
     assert schema["idempotent"] is True
     assert schema["empty_result_mode"] == "fail-open"
+    assert schema["risk_class"] == "read_only"
+    assert schema["scope"] == "internal"
+    assert schema["auto_callable"] is True
 
 
 def test_unknown_tool_returns_structured_failure():

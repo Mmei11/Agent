@@ -254,6 +254,8 @@
 
 ### Phase C｜工具运行时与 MCP client（5–7 天）
 
+> 进展（2026-11-12）：`ToolSpec` 已增加 `risk_class` / `scope` / `auto_callable`；`ToolCatalog` 落地，只把只读工具暴露给模型；`DecisionChoice` 已带 `tool_name` / `tool_args`，图内 tool 节点改为按目录执行，并有单轮 3 次预算。就医准备问题新增确定性 `guideline_retrieve` 路径，M7 mock 与模型模式均达 **1.000**（模型连续两次一致；unreachable 0、危险误调 0）。下一步：MCP client、工具结果摘要。
+
 **工程问题：** 工具契约已经很完整，但决策层不会选工具、不会传参数；外部 MCP 工具没有入口；工具结果没有摘要；多个工具之间没有调用预算。
 
 **概念：**

@@ -17,8 +17,10 @@ from backend.app.agent.general import (
     date_answer as build_date_answer,
     general_answer_is_safe,
     is_date_question,
+    is_guideline_question,
 )
 from backend.app.agent.memory_ref import is_memory_reference
+from backend.app.agent.opening import answer_guideline
 from backend.app.agent.router import route as route_reply
 from backend.app.agent.session_info import (
     build_answer as build_session_info_answer,
@@ -397,6 +399,10 @@ def answer_followup(state: ConsultationState) -> dict:
 
     if not memory_reference and is_date_question(state.latest_user_message):
         return _date_answer(state)
+
+    # 就医准备类追问：走确定性工具，不交给模型常识。
+    if not memory_reference and is_guideline_question(state.latest_user_message):
+        return answer_guideline(state, node="answer")
 
     # 其余追问交给单一路由：普通问题直接回答，医疗问题继续走下面的医疗链路。
     # 记忆指代必须走带上下文的 answer 节点，所以命中后跳过路由。
