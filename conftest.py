@@ -14,6 +14,8 @@ os.environ["AUTH_MODE"] = "off"
 os.environ["RATE_LIMIT_ENABLED"] = "0"
 # 长会话摘要会调用模型；单测默认关闭，需要时在用例里显式打开。
 os.environ.setdefault("SUMMARY_ENABLED", "0")
+# 外部 MCP 工具会拉起 npx 子进程；测试默认关闭，避免联网与慢启动。
+os.environ.setdefault("MCP_ENABLED", "0")
 # 图测试会触发风险审计；写到临时目录，避免污染仓库里的 logs/audit.jsonl。
 os.environ.setdefault(
     "AUDIT_LOG_PATH",

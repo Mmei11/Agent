@@ -87,6 +87,61 @@ def red_flag_answer_is_safe(text: str) -> bool:
     return "立即就医" in text or "及时就医" in text
 
 
+# 外部工具类问题：药品说明书与文献检索。
+DRUG_LABEL_PATTERNS = (
+    re.compile(r"(说明书|药品说明|用药说明|药品标签|药物标签)"),
+    re.compile(r"\b(fda|openfda)\b", re.IGNORECASE),
+    re.compile(r"(药品禁忌|用药禁忌|不良反应|药品警示|用药警示)"),
+)
+
+RESEARCH_PATTERNS = (
+    re.compile(r"\bpubmed\b", re.IGNORECASE),
+    re.compile(
+        r"(有没有|有哪些|有什么|有何|查一下|搜一下|找一下|检索)"
+        r"[^。！？\n]{0,12}(研究|文献|论文|证据|指南|临床试验)"
+    ),
+    re.compile(
+        r"(研究|文献|论文|指南|临床试验)[^。！？\n]{0,6}"
+        r"(显示|表明|支持|怎么说|有哪些|有什么)"
+    ),
+)
+
+# 外部文案的安全闸门：比普通回答多挡一层英文剂量表达。
+EXTERNAL_DOSAGE_PATTERNS = (
+    re.compile(
+        r"\b\d+(?:\.\d+)?\s*(?:mg|ml|g|mcg|tablet|tablets|capsule|capsules)\b",
+        re.IGNORECASE,
+    ),
+    re.compile(r"\d+\s*(?:片|粒|毫克|毫升|克)"),
+    re.compile(r"\b\d+\s*(?:dose|doses|pill|pills)\b", re.IGNORECASE),
+    re.compile(r"\b(take|taking)\b[^.]{0,40}\b(every|hours|days)\b", re.IGNORECASE),
+)
+
+
+def is_drug_label_question(message: str) -> bool:
+    """是否在问某份药品说明书。具体有没有药名由调用方再判断。"""
+    text = (message or "").strip()
+    return bool(text) and any(pattern.search(text) for pattern in DRUG_LABEL_PATTERNS)
+
+
+def is_research_question(message: str) -> bool:
+    """是否在明确要文献/研究证据，而不是问症状。"""
+    text = (message or "").strip()
+    return bool(text) and any(pattern.search(text) for pattern in RESEARCH_PATTERNS)
+
+
+def external_answer_is_safe(text: str) -> bool:
+    """外部结果的组织文案：必须带来源、不得出现剂量或处方建议。"""
+    text = text.strip()
+    if not 5 <= len(text) <= 900:
+        return False
+    if any(pattern.search(text) for pattern in UNSAFE_GENERAL_PATTERNS):
+        return False
+    if any(pattern.search(text) for pattern in EXTERNAL_DOSAGE_PATTERNS):
+        return False
+    return "openFDA" in text or "PubMed" in text
+
+
 def display_now() -> datetime:
     return datetime.now(DISPLAY_TZ)
 

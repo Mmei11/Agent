@@ -78,7 +78,13 @@ def build_context(
         "max_tool_calls": max_tool_calls,
         "followup_count": state.followup_count,
         "max_followups": max_followups,
-        "tools": DEFAULT_CATALOG.prompt_entries(),
+        # 外部工具由确定性路径（药品说明书 / 文献检索）使用；
+        # decision 只保留内部只读工具，避免模型选了外部工具却无法把结果写进最终回答。
+        "tools": [
+            entry
+            for entry in DEFAULT_CATALOG.prompt_entries()
+            if entry["scope"] == "internal"
+        ],
         **assemble_reference_context(state),
     }
 

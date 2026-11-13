@@ -46,6 +46,9 @@ services:
       MAX_MESSAGE_CHARS: ${MAX_MESSAGE_CHARS:-2000}
       MAX_STREAMS_PER_CLIENT: ${MAX_STREAMS_PER_CLIENT:-5}
       SCORE_LOG_PATH: ${SCORE_LOG_PATH:-/data/scores.jsonl}
+      # 外部 MCP 工具：默认关闭；在 .env 里设 MCP_ENABLED=1 并配置 MCP_SERVERS。
+      MCP_ENABLED: ${MCP_ENABLED:-0}
+      MCP_SERVERS: ${MCP_SERVERS:-}
       # Langfuse：容器内访问宿主机用 host.docker.internal；Docker 专用变量避免
       # 与本地 uvicorn 的 LANGFUSE_HOST=127.0.0.1 冲突。
       TRACE_SINK: ${TRACE_SINK_DOCKER:-none}

@@ -30,6 +30,7 @@ from pydantic import BaseModel, create_model
 from backend.app.config import load_env_file
 from backend.app.tools.catalog import DEFAULT_CATALOG, ToolCatalog
 from backend.app.tools.contract import ToolSpec
+from backend.app.tools.external_summaries import SUMMARIZERS
 
 logger = logging.getLogger(__name__)
 
@@ -346,8 +347,16 @@ def params_model_from_schema(tool_name: str, schema: dict) -> type[BaseModel]:
     return create_model(f"MCP_{safe_name}_Params", **fields)
 
 
-def build_tool_specs(session: MCPSession, config: MCPServerConfig) -> list[ToolSpec]:
-    """按白名单把外部工具声明转成目录里的 ToolSpec。"""
+def build_tool_specs(
+    session: MCPSession,
+    config: MCPServerConfig,
+    summarizers: dict[str, Callable[[dict], str]] | None = None,
+) -> list[ToolSpec]:
+    """按白名单把外部工具声明转成目录里的 ToolSpec。
+
+    summarizers 可选：外部工具返回的是 Markdown 大文本，通用 JSON 截断
+    只能看到标题；按工具名提供专用摘要，才能让 decision 上下文有信息量。
+    """
     allowed = set(config.allowed_tools)
     specs: list[ToolSpec] = []
 
@@ -374,6 +383,7 @@ def build_tool_specs(session: MCPSession, config: MCPServerConfig) -> list[ToolS
                 empty_result_mode="fail-open",
                 risk_class="read_only",
                 scope="external",
+                summarize=(summarizers or {}).get(tool.name),
             )
         )
     return specs
@@ -427,7 +437,7 @@ def load_external_tools(catalog: ToolCatalog | None = None) -> list[ToolSpec]:
                 continue
 
             _ACTIVE_SESSIONS.append(session)
-            for spec in build_tool_specs(session, config):
+            for spec in build_tool_specs(session, config, SUMMARIZERS):
                 try:
                     target.register(spec)
                 except ValueError:

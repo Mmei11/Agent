@@ -547,3 +547,14 @@
 - 外部工具失败：tool 节点记录 `scope`；output 对外部只读工具的 timeout/unavailable 降级为 `status=degraded`（“暂无依据”），内部工具失败仍保持 error
 - M7 mock：**1.000**（新增 red_flag 组；department/guideline/risk 保持全对）
 - 单测：579 passed + 6 skipped（新增 16 条）
+
+**2026-11-13 · Phase C 补充：接入 openFDA 与 PubMed**
+
+- 白名单只放 `openfda_get_drug_label` 与 `pubmed_search_articles`；工具一律 `read_only/external`
+- 使用托管 streamable HTTP 端点（`openfda.caseyjhand.com` / `pubmed.caseyjhand.com`），绕开自托管 npx 的 Node 24 版本要求
+- 新增 `tools/external_summaries.py`：按 Markdown 解析 openFDA 说明书与 PubMed 题录；dedicated summarizer 进 decision 上下文，替代通用 JSON 截断
+- 新增确定性回答路径：`answer_drug_label`（用途/警示/不要使用 + Set ID）与 `answer_research`（标题/期刊/年份/PMID/DOI），追问路径也可用 PubMed
+- 安全：外部文案剔除剂量句、不带处方建议；必须有 openFDA/PubMed 来源；工具未注册时自动回落到原逻辑
+- decision 的 tools 清单只保留 internal，避免模型选外部工具却无法把结果写进最终回答
+- 真实端到端：布洛芬返回 FDA 警示；PubMed 返回 3 条题录
+- 单测：**592 passed + 6 skipped**（新增 13 条外部工具测试）
