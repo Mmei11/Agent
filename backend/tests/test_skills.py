@@ -2,6 +2,10 @@
 
 import pytest
 
+from backend.app.agent.followup import followup
+from backend.app.agent.intake import extract_facts
+from backend.app.agent.skill_route import skill_route
+from backend.app.agent.state import ConsultationState
 from backend.app.skills import registry
 from backend.app.skills.registry import (
     DEFAULT_NAME,
@@ -100,3 +104,77 @@ def test_disabled_skills_only_expose_default(monkeypatch):
 
     assert names == {DEFAULT_NAME}
     assert route("孩子发烧") == DEFAULT_NAME
+
+
+def test_skill_route_recomputes_missing_by_skill():
+    state = ConsultationState(
+        latest_user_message="孩子三岁，发烧三十八度五",
+        collected_facts={"主要症状": ["发热"], "年龄": ["三岁"], "测量值": ["三十八度五"]},
+    )
+
+    result = skill_route(state)
+
+    assert result["skill"] == "pediatric_fever"
+    assert "部位" not in result["missing_fields"]
+    assert "持续时间" in result["missing_fields"]
+    assert "精神状态" in result["missing_fields"]
+    assert result["trace"][0]["source"] == "router"
+
+
+def test_skill_route_is_sticky_once_selected():
+    state = ConsultationState(
+        latest_user_message="孩子发烧", skill="headache", collected_facts={}
+    )
+
+    result = skill_route(state)
+
+    assert result["skill"] == "headache"
+    assert result["trace"][0]["source"] == "sticky"
+
+
+def test_followup_uses_skill_priority_and_template():
+    state = ConsultationState(
+        skill="pediatric_fever",
+        missing_fields=["持续时间", "年龄", "测量值"],
+        asked_questions=[],
+        collected_facts={},
+    )
+
+    result = followup(state)
+
+    assert result["trace"][0]["skill"] == "pediatric_fever"
+    assert result["trace"][0]["selected_field"] == "年龄"
+    assert result["conversation"][0]["text"] == "孩子多大了，是几个月还是几岁？"
+    assert result["suggested_replies"]
+
+
+def test_intake_extracts_age_and_mental_status():
+    facts = extract_facts("孩子三岁，精神还可以")
+
+    assert "年龄" in facts
+    assert "精神状态" in facts
+
+
+def test_graph_routes_pediatric_fever_into_skill_flow():
+    from backend.app.agent.graph import build_graph
+
+    app = build_graph()
+    result = app.invoke(
+        {"latest_user_message": "孩子三岁，发烧三十八度五，精神还可以"}
+    )
+
+    assert result["skill"] == "pediatric_fever"
+    assert result["next_action"] == "ASK_FOLLOWUP"
+    assert "持续多久" in result["conversation"][-1]["text"]
+
+
+def test_disabled_skills_graph_uses_default(monkeypatch):
+    from backend.app.agent.graph import build_graph
+
+    monkeypatch.setenv("SKILLS_ENABLED", "0")
+    reset_skills_cache()
+
+    app = build_graph()
+    result = app.invoke({"latest_user_message": "孩子三岁，发烧三十八度五"})
+
+    assert result["skill"] == DEFAULT_NAME

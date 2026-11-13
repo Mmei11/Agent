@@ -26,6 +26,7 @@ from backend.app.agent.result import (
 from backend.app.agent.state import ConsultationState  # 状态类型
 from backend.app.agent.opening import route_general  # 未出结果时的普通/医疗预路由
 from backend.app.agent.answer import answer_followup  # 结果生成后的追问回答
+from backend.app.agent.skill_route import skill_route  # 医疗路由后的技能选择
 from backend.app.observability import current_trace, span, traced_node
 from backend.app.safety.audit import AuditEvent, input_digest, write as write_audit
 from backend.app.safety.output_rail import check as check_output
@@ -340,6 +341,7 @@ def build_graph(checkpointer=None):
     graph.add_node("intake", traced_node("intake")(intake))  # 入口：提取字段
     graph.add_node("risk_check", traced_node("risk_check")(risk_check))  # 风险检查
     graph.add_node("general_route", route_general)  # 普通/医疗预路由；模型调用自带 span
+    graph.add_node("skill_route", traced_node("skill_route")(skill_route))  # 技能选择与字段重算
     graph.add_node("decision", traced_node("decision")(decision))  # 决策：模型或预设选动作
     graph.add_node("followup", traced_node("followup")(followup))  # 追问：选字段生成问题
     graph.add_node("tool", traced_node("tool")(tool))  # 工具：调注册表里的受限工具
@@ -353,8 +355,9 @@ def build_graph(checkpointer=None):
     graph.add_conditional_edges(
         "general_route",
         route_after_general,
-        {"general": END, "medical": "decision"},
+        {"general": END, "medical": "skill_route"},
     )
+    graph.add_edge("skill_route", "decision")  # 技能选定后进入动作决策
     graph.add_conditional_edges("decision", route_after_decision)  # 决策后分路：追问/工具/输出
     graph.add_edge("followup", END)  # 一次请求只追问一次，等待用户下一轮回答
     graph.add_edge("tool", "decision")  # 工具 → 回到决策（循环）

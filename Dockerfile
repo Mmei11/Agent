@@ -19,6 +19,7 @@ COPY pyproject.toml uv.lock ./
 RUN uv sync --locked --no-dev
 
 COPY backend ./backend
+COPY skills ./skills
 
 USER app
 EXPOSE 8000

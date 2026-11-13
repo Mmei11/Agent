@@ -54,6 +54,9 @@ class ConsultationState(BaseModel):
     # missing_fields：还没收集到的字段名，每轮重新计算（覆盖）
     missing_fields: list = []
 
+    # skill：当前会话选中的技能名；skill_route 写入，followup/decision 读取。
+    skill: str = ""
+
 
     # asked_questions：已问过的问题，只增不减
     asked_questions: Annotated[list, operator.add] = []

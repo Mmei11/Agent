@@ -35,6 +35,10 @@ class IntakeFacts(BaseModel):
     aggravating: list[Fact] = Field(default_factory=list, description="加重缓解因素")
     pattern: list[Fact] = Field(default_factory=list, description="时间模式，发作规律与频次")
     measurement: list[Fact] = Field(default_factory=list, description="测量值，如体温血压")
+    age: list[Fact] = Field(default_factory=list, description="年龄，月龄或岁")
+    mental_status: list[Fact] = Field(
+        default_factory=list, description="精神状态，如精神好、精神差、嗜睡"
+    )
 
 
 FIELD_MAP = {
@@ -47,6 +51,8 @@ FIELD_MAP = {
     "aggravating": "加重缓解因素",
     "pattern": "时间模式",
     "measurement": "测量值",
+    "age": "年龄",
+    "mental_status": "精神状态",
 }
 
 

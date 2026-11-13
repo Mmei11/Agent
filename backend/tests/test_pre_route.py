@@ -152,4 +152,4 @@ def test_graph_medical_route_still_asks_fields(monkeypatch):
     result = app.invoke({"latest_user_message": "我头痛"})
 
     assert result["next_action"] == "ASK_FOLLOWUP"
-    assert "请问这种情况持续多久了？" in result["conversation"][-1]["text"]
+    assert "请问头痛持续多久了？" in result["conversation"][-1]["text"]

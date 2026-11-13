@@ -1,5 +1,6 @@
 """Phase D：技能层。"""
 
+from backend.app.skills.context import skill_for
 from backend.app.skills.registry import (
     DEFAULT_NAME,
     Skill,
@@ -19,5 +20,6 @@ __all__ = [
     "load_skill",
     "reset_skills_cache",
     "route",
+    "skill_for",
     "skills_dir",
 ]

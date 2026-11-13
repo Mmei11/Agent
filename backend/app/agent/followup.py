@@ -72,13 +72,18 @@ def clean_replies(candidates: list, state: ConsultationState) -> list[str]:
 
 
 def suggest_replies(
-    state: ConsultationState, field: str | None, question: str
+    state: ConsultationState,
+    field: str | None,
+    question: str,
+    *,
+    options: dict[str, list[str]] | None = None,
 ) -> tuple[list[str], dict]:
     """优先让模型结合已收集信息生成候选；失败或未启用时回退静态选项。
 
     返回（候选回答, 来源与用量）；来源写进 trace，便于比较模型与兜底的比例。
     """
-    fallback = clean_replies(REPLY_OPTIONS.get(field) or [], state)
+    fallback_options = REPLY_OPTIONS if options is None else options
+    fallback = clean_replies(fallback_options.get(field) or [], state)
     if field is None or os.getenv("USE_MODEL") != "1":
         return fallback, {"source": "static"}
 
@@ -107,39 +112,69 @@ def suggest_replies(
     }
 
 
-def select_next_field(missing_fields: list, asked_questions: list) -> str | None:
+def select_next_field(
+    missing_fields: list,
+    asked_questions: list,
+    *,
+    priority: dict[str, int] | None = None,
+    templates: dict[str, str] | None = None,
+) -> str | None:
     """从缺失字段中选一个还没问过的，按优先级排序。
 
-    返回字段名；没有可问的字段时返回 None。
+    技能层传入自己的 priority / templates；不传时保持原有默认行为。
     """
+    if priority is None:
+        active_priority = FIELD_PRIORITY
+    elif isinstance(priority, dict):
+        active_priority = priority
+    else:
+        # manifest 用列表表达顺序；转成“字段 → 序号”供排序。
+        active_priority = {field: index for index, field in enumerate(priority)}
+    active_templates = QUESTION_TEMPLATES if templates is None else templates
     asked_text = " ".join(asked_questions)
 
     # 筛掉已经问过的字段：检查问题模板是否已出现在 asked_questions 里
-    not_asked = [f for f in missing_fields if QUESTION_TEMPLATES.get(f, "") not in asked_text]
+    not_asked = [
+        f for f in missing_fields if active_templates.get(f, "") not in asked_text
+    ]
 
     if not not_asked:
         return None
 
     # 按优先级排序，取第一个
-    not_asked.sort(key=lambda f: FIELD_PRIORITY.get(f, 99))
+    not_asked.sort(key=lambda f: active_priority.get(f, 99))
     return not_asked[0]
 
 
-def generate_question(field: str | None) -> str:
+def generate_question(
+    field: str | None, *, templates: dict[str, str] | None = None
+) -> str:
     """根据字段名生成一个简短问题。没有字段时返回收束提示。"""
     if field is None:
         return "已收集足够信息，将为您整理结果。"
-    return QUESTION_TEMPLATES.get(field, f"请补充{field}相关的信息。")
+    active = QUESTION_TEMPLATES if templates is None else templates
+    return active.get(field, f"请补充{field}相关的信息。")
 
 
 def followup(state: ConsultationState) -> dict:
-    """追问节点：选字段、生成问题、更新已问列表和追问计数。
+    """追问节点：按当前技能选字段、生成问题、更新已问列表和追问计数。
 
     ASK_FOLLOWUP 动作到达此节点。返回的问题会显示给用户。
     """
-    field = select_next_field(state.missing_fields, state.asked_questions)
-    question = generate_question(field)
-    replies, reply_meta = suggest_replies(state, field, question)
+    from backend.app.skills.context import skill_for
+
+    skill = skill_for(state)
+    manifest = skill.manifest
+    field = select_next_field(
+        state.missing_fields,
+        state.asked_questions,
+        priority=manifest.followup_priority,
+        templates=manifest.question_templates,
+    )
+    question = generate_question(field, templates=manifest.question_templates)
+    replies, reply_meta = suggest_replies(
+        state, field, question, options=manifest.reply_options
+    )
     scope = current_trace()
 
     return {
@@ -150,6 +185,7 @@ def followup(state: ConsultationState) -> dict:
         "trace": [
             {
                 "node": "followup",
+                "skill": manifest.name,
                 "selected_field": field,
                 "count": state.followup_count + 1,
                 "trace_id": scope.trace_id if scope else "",

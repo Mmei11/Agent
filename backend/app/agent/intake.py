@@ -19,7 +19,7 @@ ALL_FIELDS = REQUIRED_FIELDS + OPTIONAL_FIELDS
 
 # 关键词映射：每个字段对应一组触发词
 FIELD_KEYWORDS = {
-    "主要症状": ["头部不适", "头痛", "头晕", "恶心", "发热", "呼吸困难", "咳嗽", "腹痛"],
+    "主要症状": ["头部不适", "头痛", "头晕", "恶心", "发热", "发烧", "呼吸困难", "咳嗽", "腹痛"],
     "持续时间": ["两天", "三天", "一周", "一天", "几天", "半个月", "一个月"],
     "部位": ["前额", "头部", "胸部", "腹部", "背部", "左侧", "右侧"],
     "程度": ["轻", "明显", "严重", "剧烈", "轻微"],
@@ -30,6 +30,8 @@ FIELD_KEYWORDS = {
     "加重缓解因素": ["更明显", "更疼", "加重", "缓解", "就胀", "就喘", "就反酸", "弯腰", "站起来", "爬"],
     "时间模式": ["一阵一阵", "晚上", "夜里", "早上", "每天", "反复", "总醒", "次"],
     "测量值": ["三十八度", "三十九度", "三十七度", "四十度", "℃", "毫米汞柱", "次/分"],
+    "年龄": ["岁", "个月", "月龄"],
+    "精神状态": ["精神", "嗜睡", "哭闹", "意识"],
 }
 
 # 笼统否认全部伴随症状："暂无其他不适""没有其他症状""没有任何不舒服"。
@@ -73,9 +75,10 @@ def extract_facts(message: str) -> dict:
     return facts
 
 
-def compute_missing(collected: dict) -> list:
-    """计算还缺失的字段：只有必需字段参与，可选字段永远不会变成追问目标。"""
-    return [f for f in REQUIRED_FIELDS if f not in collected]
+def compute_missing(collected: dict, required_fields: list | None = None) -> list:
+    """计算还缺失的字段：默认用全局六字段；技能层可传自己的必需字段。"""
+    required = REQUIRED_FIELDS if required_fields is None else required_fields
+    return [f for f in required if f not in collected]
 
 
 def extract_facts_auto(message: str, meta: dict | None = None) -> tuple[dict, dict]:

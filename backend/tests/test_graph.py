@@ -41,6 +41,7 @@ def test_normal_path_calls_tool_then_finalizes():
     assert nodes == [
         "intake",
         "risk_check",
+        "skill_route",
         "decision",
         "tool",
         "decision",

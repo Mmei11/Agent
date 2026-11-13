@@ -14,7 +14,7 @@ NEGATION_PREFIXES = ("没有", "无明显", "未出现", "否认", "不是")
 
 # 观测用的 prompt 标识：改 prompt 时同步升版本，才能按版本对比指标。
 PROMPT_NAME = "intake.extract"
-PROMPT_VERSION = "v2"
+PROMPT_VERSION = "v3"
 
 # “加重缓解因素”只接受带这些线索的原文片段；单纯提到吃药/治疗不算。
 FACTOR_CUES = (
@@ -66,6 +66,8 @@ SYSTEM_PROMPT = """你是"模拟问诊"项目的信息抽取器。用户会给�
 - aggravating 加重缓解因素
 - pattern 时间模式（发作规律与频次）
 - measurement 测量值（体温、血压等）
+- age 年龄（月龄或岁）
+- mental_status 精神状态（精神好/差、嗜睡、哭闹等）
 
 每个数组元素包含三个键：
 - value：字段内容，取原文中最短的完整片段，不归一化、不解释

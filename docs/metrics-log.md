@@ -569,3 +569,15 @@
 - `backend/app/skills/router.py`：关键词命中 + priority 决胜；`SKILLS_ENABLED=0` 直接回退 default
 - M9：6 条 dev 样本全部命中，准确率 **1.000**（headache 3、pediatric_fever 3）
 - 单测：**639 passed**（新增 14 条技能测试）
+
+**2026-11-13 · Phase D 第 2 课：技能接入图**
+
+- 图新增 `skill_route` 节点：`general_route` 判定医疗后进入；首次按消息路由，之后 sticky
+- `state.skill` 记录当前技能；`skill_route` 用 manifest 的 required_fields 重算 `missing_fields`
+- intake 新增 `年龄`、`精神状态` 字段与抽取提示；儿科发热可收集年龄和体温
+- followup 按技能的 `followup_priority`、`question_templates`、`reply_options` 工作
+- decision 判断“还能不能追问”时同样使用技能模板，避免自定义问题被当成没问过
+- default 技能与旧行为一致；`SKILLS_ENABLED=0` 时图内回到 default
+- 实测：`孩子三岁，发烧三十八度五，精神还可以` → `pediatric_fever`，缺持续时间/伴随表现，追问“发热持续多久了？”
+- Dockerfile 增加 `COPY skills ./skills`，否则容器里只加载 default
+- M9 1.000；单测 **645 passed**

@@ -7,6 +7,7 @@ from pydantic import ValidationError
 
 from backend.app.agent.followup import select_next_field
 from backend.app.agent.state import ConsultationState
+from backend.app.skills.context import skill_for
 from backend.app.tools.catalog import DEFAULT_CATALOG, ToolCatalog
 from backend.app.tools.contract import ToolSpec
 
@@ -102,10 +103,24 @@ def _build_args(
     return candidate
 
 
+def _can_ask(state: ConsultationState) -> bool:
+    """按当前技能的字段与模板判断是否还有值得问的字段。"""
+    skill = skill_for(state)
+    return (
+        select_next_field(
+            state.missing_fields,
+            state.asked_questions,
+            priority=skill.manifest.followup_priority,
+            templates=skill.manifest.question_templates,
+        )
+        is not None
+    )
+
+
 def rule_action(state: ConsultationState, max_followups: int) -> str:
     """确定性规则：没问够就问，没调工具就调，否则结束。"""
     under_limit = state.followup_count < max_followups
-    can_ask = select_next_field(state.missing_fields, state.asked_questions) is not None
+    can_ask = _can_ask(state)
     tool_called = "department_route" in state.tool_results
 
     if under_limit and can_ask:
@@ -190,7 +205,7 @@ def validate_action(model_choice: str, state: ConsultationState, max_followups: 
     保留给既有测试和脚本；图内使用 validate_decision。
     """
     under_limit = state.followup_count < max_followups
-    can_ask = select_next_field(state.missing_fields, state.asked_questions) is not None
+    can_ask = _can_ask(state)
     tool_called = "department_route" in state.tool_results
 
     if model_choice == "ASK_FOLLOWUP":
@@ -223,7 +238,7 @@ def validate_decision(
         return rule_decision(state, max_followups)
 
     under_limit = state.followup_count < max_followups
-    can_ask = select_next_field(state.missing_fields, state.asked_questions) is not None
+    can_ask = _can_ask(state)
 
     if decision.action == "ASK_FOLLOWUP":
         if user_declined_followup(state.latest_user_message) or not (

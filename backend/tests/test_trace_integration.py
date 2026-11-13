@@ -43,6 +43,7 @@ def test_graph_nodes_emit_spans_and_link_trace_id():
         "intake",
         "safety.policy",
         "risk_check",
+        "skill_route",
         "decision",
         "tool",
         "decision",
@@ -55,7 +56,15 @@ def test_graph_nodes_emit_spans_and_link_trace_id():
     # 根 span 是 consultation.turn；节点直接挂在根下，safety span 挂在所属节点下。
     root = next(record for record in sink.records if record.name == "consultation.turn")
     assert root.parent_span_id is None
-    node_names = {"intake", "risk_check", "decision", "tool", "followup", "output"}
+    node_names = {
+        "intake",
+        "risk_check",
+        "skill_route",
+        "decision",
+        "tool",
+        "followup",
+        "output",
+    }
     for record in sink.records:
         if record.name == "consultation.turn":
             continue

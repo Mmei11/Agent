@@ -12,6 +12,7 @@ from backend.app.observability.tracer import span
 SAFE_KEYS = (
     "extractor",
     "fallback",
+    "skill",
     "risk_level",
     "rule",
     "model_choice",
