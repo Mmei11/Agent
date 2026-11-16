@@ -72,6 +72,11 @@ ALLOWED_NAMES = {
     "SMTP_PASSWORD",
     "SMTP_FROM",
     "SMTP_STARTTLS",
+    # Phase F：工具重试与熔断
+    "TOOL_MAX_ATTEMPTS",
+    "TOOL_RETRY_BACKOFF_MS",
+    "TOOL_BREAKER_THRESHOLD",
+    "TOOL_BREAKER_COOLDOWN_S",
     # 本地轨迹
     "TRACE_SINK",
     "TRACE_PATH",

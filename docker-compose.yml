@@ -60,6 +60,11 @@ services:
       SMTP_PASSWORD: ${SMTP_PASSWORD:-}
       SMTP_FROM: ${SMTP_FROM:-no-reply@localhost}
       SMTP_STARTTLS: ${SMTP_STARTTLS:-1}
+      # Phase F：工具重试与熔断。
+      TOOL_MAX_ATTEMPTS: ${TOOL_MAX_ATTEMPTS:-2}
+      TOOL_RETRY_BACKOFF_MS: ${TOOL_RETRY_BACKOFF_MS:-100}
+      TOOL_BREAKER_THRESHOLD: ${TOOL_BREAKER_THRESHOLD:-3}
+      TOOL_BREAKER_COOLDOWN_S: ${TOOL_BREAKER_COOLDOWN_S:-30}
       # Langfuse：容器内访问宿主机用 host.docker.internal；Docker 专用变量避免
       # 与本地 uvicorn 的 LANGFUSE_HOST=127.0.0.1 冲突。
       TRACE_SINK: ${TRACE_SINK_DOCKER:-none}

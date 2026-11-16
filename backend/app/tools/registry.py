@@ -5,6 +5,7 @@ import os
 from backend.app.tools.catalog import DEFAULT_CATALOG
 from backend.app.tools.contract import ToolResult
 from backend.app.tools.knowledge_tools import KNOWLEDGE_TOOL_SPECS
+from backend.app.tools.runtime import call_with_reliability
 
 # 症状关键词 → 科室方向的受限映射
 SYMPTOM_DEPARTMENT_MAP = {
@@ -72,7 +73,11 @@ def call_tool(name: str, params: dict) -> ToolResult:
     if os.getenv("KNOWLEDGE_BACKEND", "pgvector") == "stub" and name in KNOWLEDGE_TOOL_SPECS:
         # CI / 门禁自检没有向量库：知识类工具用确定性替身，外部工具照常走目录。
         return stub_call_tool(name, params)
-    return DEFAULT_CATALOG.call(name, params)
+
+    spec = DEFAULT_CATALOG.get(name)
+    if spec is None:
+        return DEFAULT_CATALOG.call(name, params)
+    return call_with_reliability(spec, params)
 
 
 def stub_call_tool(name: str, params: dict) -> ToolResult:

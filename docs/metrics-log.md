@@ -641,3 +641,11 @@
 - 新增 `eval/source_check.py`：结构检查（来源存在、verified 有证据、无自造来源）；CI 接入非严格门禁，`--strict` 作为发布门禁
 - 当前仍待人工：112 条知识临床审核、19 条说明书药师审核；完成后才能把 `review_status` 升为 `clinically_reviewed / pharmacist_approved`
 - 单测 **659 passed**
+**2026-11-16 · Phase F 第 4 课：工具重试与熔断**
+
+- 新增 `backend/app/tools/runtime.py`：`call_with_reliability` 只对 `timeout / unavailable` 重试，参数错误不重试；非幂等工具不重试；指数退避
+- 新增 `backend/app/tools/breaker.py`：熔断器从 MCP 客户端抽成通用实现，按工具名独立计数；连续失败到阈值后在冷却期内直接返回结构化失败
+- `registry.call_tool` 统一接入：内部工具与外部 MCP 工具走同一条重试/熔断路径；stub 知识工具保持确定性替身
+- 新增 `TOOL_MAX_ATTEMPTS / TOOL_RETRY_BACKOFF_MS / TOOL_BREAKER_THRESHOLD / TOOL_BREAKER_COOLDOWN_S`，默认 2 次 / 100ms / 3 次 / 30s
+- 新增 5 条测试：瞬时失败重试成功、参数错误不重试、非幂等不重试、熔断打开后不再调用、退避间隔
+- 单测 **675 passed**

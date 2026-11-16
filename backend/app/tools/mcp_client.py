@@ -16,7 +16,6 @@ import json
 import logging
 import os
 import threading
-import time
 from concurrent.futures import TimeoutError as FutureTimeout
 from contextlib import AsyncExitStack
 from dataclasses import dataclass, field
@@ -29,6 +28,7 @@ from pydantic import BaseModel, create_model
 
 from backend.app.config import load_env_file
 from backend.app.tools.catalog import DEFAULT_CATALOG, ToolCatalog
+from backend.app.tools.breaker import CircuitBreaker
 from backend.app.tools.contract import ToolSpec
 from backend.app.tools.external_summaries import SUMMARIZERS
 
@@ -122,39 +122,6 @@ def parse_server_configs(raw: str) -> list[MCPServerConfig]:
         seen.add(config.name)
         configs.append(config)
     return configs
-
-
-class CircuitBreaker:
-    """连续失败到阈值后短暂摘除，避免每一轮都白等一次超时。"""
-
-    def __init__(
-        self,
-        threshold: int = 3,
-        cooldown_s: float = 30.0,
-        clock: Callable[[], float] = time.monotonic,
-    ):
-        self.threshold = threshold
-        self.cooldown_s = cooldown_s
-        self._clock = clock
-        self._failures = 0
-        self._open_until = 0.0
-        self._lock = threading.Lock()
-
-    def allow(self) -> bool:
-        with self._lock:
-            return self._clock() >= self._open_until
-
-    def record_success(self) -> None:
-        with self._lock:
-            self._failures = 0
-            self._open_until = 0.0
-
-    def record_failure(self) -> None:
-        with self._lock:
-            self._failures += 1
-            if self._failures >= self.threshold:
-                self._open_until = self._clock() + self.cooldown_s
-                self._failures = 0
 
 
 def _content_text(result) -> str:
