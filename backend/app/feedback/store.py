@@ -93,6 +93,19 @@ def list_for_session(session_id: str) -> list[dict]:
     return [dict(zip(keys, row)) for row in rows]
 
 
+def delete_for_sessions(session_ids: list[str]) -> int:
+    """删除账号时一并清理这些会话的反馈，避免只删会话留下孤儿反馈。"""
+    if not session_ids:
+        return 0
+    placeholders = ",".join("?" for _ in session_ids)
+    with _connect(_db_path()) as conn:
+        cursor = conn.execute(
+            f"DELETE FROM feedback WHERE session_id IN ({placeholders})",
+            session_ids,
+        )
+        return cursor.rowcount
+
+
 def stats() -> dict:
     """离线统计好评率；演示与面试时可以直接引用。"""
     with _connect(_db_path()) as conn:

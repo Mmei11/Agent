@@ -63,7 +63,9 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
             status TEXT NOT NULL DEFAULT 'active',
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL,
-            last_login_at TEXT
+            last_login_at TEXT,
+            consent_version TEXT NOT NULL DEFAULT '',
+            consent_at TEXT
         );
 
         CREATE TABLE IF NOT EXISTS auth_sessions (
@@ -95,30 +97,99 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
             ON user_sessions(user_id, last_active_at DESC);
         """
     )
+    # 旧库补列：CREATE TABLE IF NOT EXISTS 不会修改已存在的表。
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(users)")}
+    if "consent_version" not in columns:
+        conn.execute(
+            "ALTER TABLE users ADD COLUMN consent_version TEXT NOT NULL DEFAULT ''"
+        )
+    if "consent_at" not in columns:
+        conn.execute("ALTER TABLE users ADD COLUMN consent_at TEXT")
 
 
 def _user_row(row: sqlite3.Row | None) -> dict | None:
     return dict(row) if row is not None else None
 
 
-def create_user(email: str, display_name: str, password_hash: str) -> dict:
+def create_user(
+    email: str,
+    display_name: str,
+    password_hash: str,
+    consent_version: str = "",
+) -> dict:
     now = _iso(_now())
     user_id = str(uuid.uuid4())
+    consent_at = now if consent_version else None
     try:
         with _connection() as conn:
             conn.execute(
                 """
                 INSERT INTO users
                     (id, email, display_name, password_hash, status,
-                     created_at, updated_at, last_login_at)
-                VALUES (?, ?, ?, ?, 'active', ?, ?, NULL)
+                     created_at, updated_at, last_login_at,
+                     consent_version, consent_at)
+                VALUES (?, ?, ?, ?, 'active', ?, ?, NULL, ?, ?)
                 """,
-                (user_id, email, display_name, password_hash, now, now),
+                (
+                    user_id,
+                    email,
+                    display_name,
+                    password_hash,
+                    now,
+                    now,
+                    consent_version,
+                    consent_at,
+                ),
             )
     except sqlite3.IntegrityError as exc:
         # 并发注册同一邮箱时，唯一索引是最后一道防线。
         raise DuplicateEmail(email) from exc
     return get_user_by_id(user_id)
+
+
+def record_consent(user_id: str, version: str) -> dict | None:
+    now = _iso(_now())
+    with _connection() as conn:
+        conn.execute(
+            "UPDATE users SET consent_version = ?, consent_at = ?, updated_at = ? "
+            "WHERE id = ?",
+            (version, now, now, user_id),
+        )
+    return get_user_by_id(user_id)
+
+
+def delete_user(user_id: str) -> list[str]:
+    """删除账号并返回该账号的 session_id，调用方负责清 checkpoint 与反馈。"""
+    with _connection() as conn:
+        rows = conn.execute(
+            "SELECT session_id FROM user_sessions WHERE user_id = ?", (user_id,)
+        ).fetchall()
+        ids = [row["session_id"] for row in rows]
+        conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
+    return ids
+
+
+def sessions_before(cutoff: str) -> list[str]:
+    with _connection() as conn:
+        rows = conn.execute(
+            "SELECT session_id FROM user_sessions WHERE last_active_at < ?",
+            (cutoff,),
+        ).fetchall()
+    return [row["session_id"] for row in rows]
+
+
+def purge_sessions_before(cutoff: str) -> list[str]:
+    with _connection() as conn:
+        rows = conn.execute(
+            "SELECT session_id FROM user_sessions WHERE last_active_at < ?",
+            (cutoff,),
+        ).fetchall()
+        ids = [row["session_id"] for row in rows]
+        conn.executemany(
+            "DELETE FROM user_sessions WHERE session_id = ?",
+            [(session_id,) for session_id in ids],
+        )
+    return ids
 
 
 def get_user_by_email(email: str) -> dict | None:

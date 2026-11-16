@@ -1661,3 +1661,170 @@ footer .build-tag,
         padding: 22px 16px 18px
     }
 }
+
+/* Phase F：隐私说明与知情同意 */
+.auth-consent {
+    display: flex;
+    gap: 8px;
+    align-items: flex-start;
+    margin: 4px 0 14px;
+    font-size: 13px;
+    line-height: 1.6;
+    color: #4c635c
+}
+
+.auth-consent input {
+    margin-top: 3px
+}
+
+.auth-consent .auth-link {
+    padding: 0;
+    background: none;
+    border: 0;
+    color: #1e7a5f;
+    text-decoration: underline
+}
+
+.privacy-scrim {
+    position: fixed;
+    inset: 0;
+    background: rgba(18, 40, 34, .35);
+    backdrop-filter: blur(3px);
+    z-index: 60
+}
+
+.privacy-panel {
+    position: fixed;
+    z-index: 61;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: min(680px, calc(100vw - 32px));
+    max-height: min(86vh, 820px);
+    overflow: auto;
+    background: #fff;
+    border-radius: 18px;
+    padding: 26px 28px;
+    border: 1px solid #dfe8e2;
+    box-shadow: 0 24px 80px rgba(24, 51, 47, .18)
+}
+
+.privacy-panel header {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    align-items: flex-start
+}
+
+.privacy-panel h2 {
+    margin: 4px 0 0;
+    font-size: 22px
+}
+
+.privacy-version {
+    margin: 6px 0 16px;
+    color: #82958d;
+    font-size: 12px
+}
+
+.privacy-sections section {
+    margin: 0 0 14px
+}
+
+.privacy-sections h3 {
+    margin: 0 0 4px;
+    font-size: 14px;
+    color: #1f5e4e
+}
+
+.privacy-sections p {
+    margin: 0;
+    font-size: 13px;
+    line-height: 1.75;
+    color: #4c635c
+}
+
+.privacy-consent {
+    display: flex;
+    gap: 8px;
+    align-items: flex-start;
+    margin: 16px 0;
+    font-size: 13px;
+    color: #2e4a43
+}
+
+.privacy-consent input {
+    margin-top: 3px
+}
+
+.privacy-actions {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    flex-wrap: wrap;
+    margin-top: 16px
+}
+
+.privacy-delete {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    margin-left: auto;
+    flex-wrap: wrap
+}
+
+.privacy-delete input {
+    padding: 8px 10px;
+    border: 1px solid #d7e2dc;
+    border-radius: 8px;
+    font-size: 12px;
+    min-width: 200px
+}
+
+.danger-action {
+    background: #ae493d;
+    color: #fff;
+    border: 0;
+    border-radius: 8px;
+    padding: 8px 12px;
+    font-size: 12px
+}
+
+.primary-action {
+    background: #1e7a5f;
+    color: #fff;
+    border: 0;
+    border-radius: 10px;
+    padding: 10px 16px;
+    font-size: 13px
+}
+
+.primary-action:disabled {
+    opacity: .5
+}
+
+.privacy-notice {
+    color: #1e7a5f;
+    font-size: 12px
+}
+
+.privacy-error {
+    color: #ae493d;
+    font-size: 12px
+}
+
+.privacy-gate-screen {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+    background: radial-gradient(circle at 8% 0%, #e5f3ed 0, transparent 34%), #f6f8f5
+}
+
+.privacy-gate-screen>p {
+    margin: 0;
+    color: #4c635c;
+    font-size: 14px
+}

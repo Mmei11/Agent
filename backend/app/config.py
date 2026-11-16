@@ -61,6 +61,9 @@ ALLOWED_NAMES = {
     "SKILLS_DIR",
     "SKILL_ROUTER_MODE",
     "PROMPTS_DIR",
+    # Phase F：隐私与数据保留
+    "DATA_RETENTION_DAYS",
+    "PRIVACY_CONSENT_REQUIRED",
     # 本地轨迹
     "TRACE_SINK",
     "TRACE_PATH",

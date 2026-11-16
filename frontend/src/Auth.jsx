@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import PrivacyPanel, { PRIVACY_VERSION } from "./Privacy.jsx";
 
 // 与后端保持一致的轻量校验；后端仍会再校验一次，前端只负责即时提示。
 const EMAIL_PATTERN = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
@@ -56,7 +57,7 @@ export async function deleteMySession(sessionId) {
   });
 }
 
-function validate({ mode, email, password, confirm, displayName }) {
+function validate({ mode, email, password, confirm, displayName, consent }) {
   if (!EMAIL_PATTERN.test(email.trim())) return "请输入有效的邮箱地址";
   if (!password) return "请输入密码";
   if (mode === "register") {
@@ -66,6 +67,7 @@ function validate({ mode, email, password, confirm, displayName }) {
     }
     if (password !== confirm) return "两次输入的密码不一致";
     if (displayName.trim().length > 30) return "昵称不能超过 30 字";
+    if (!consent) return "请先阅读并同意隐私说明";
   }
   return "";
 }
@@ -77,6 +79,8 @@ export default function AuthScreen({ onAuthed }) {
   const [confirm, setConfirm] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [showPassword, setShowPassword] = useState(false);
+  const [consent, setConsent] = useState(false);
+  const [privacyOpen, setPrivacyOpen] = useState(false);
   const [error, setError] = useState("");
   const [pending, setPending] = useState(false);
   const emailRef = useRef(null);
@@ -98,7 +102,7 @@ export default function AuthScreen({ onAuthed }) {
     event.preventDefault();
     if (pending) return;
 
-    const problem = validate({ mode, email, password, confirm, displayName });
+    const problem = validate({ mode, email, password, confirm, displayName, consent });
     if (problem) {
       setError(problem);
       return;
@@ -111,7 +115,13 @@ export default function AuthScreen({ onAuthed }) {
         method: "POST",
         body: JSON.stringify(
           isRegister
-            ? { email: email.trim(), password, display_name: displayName.trim() }
+            ? {
+                email: email.trim(),
+                password,
+                display_name: displayName.trim(),
+                consent: true,
+                consent_version: PRIVACY_VERSION,
+              }
             : { email: email.trim(), password },
         ),
       });
@@ -283,6 +293,27 @@ export default function AuthScreen({ onAuthed }) {
               </div>
             )}
 
+            {isRegister && (
+              <label className="auth-consent">
+                <input
+                  type="checkbox"
+                  checked={consent}
+                  onChange={(event) => setConsent(event.target.checked)}
+                  disabled={pending}
+                />
+                <span>
+                  我已阅读并同意
+                  <button
+                    type="button"
+                    className="auth-link"
+                    onClick={() => setPrivacyOpen(true)}
+                  >
+                    《隐私说明》
+                  </button>
+                </span>
+              </label>
+            )}
+
             {error && (
               <div className="auth-error" role="alert">
                 {error}
@@ -318,6 +349,12 @@ export default function AuthScreen({ onAuthed }) {
           <span className="build-tag">BUILD {__BUILD_ID__}</span>
         </p>
       </main>
+
+      <PrivacyPanel
+        open={privacyOpen}
+        user={null}
+        onClose={() => setPrivacyOpen(false)}
+      />
     </div>
   );
 }

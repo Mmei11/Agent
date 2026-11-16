@@ -26,6 +26,8 @@ router = APIRouter(prefix="/auth", tags=["账号"])
 COOKIE_NAME = "consult_auth"
 COOKIE_PATH = "/"
 SESSION_TTL_DAYS = store.DEFAULT_SESSION_TTL_DAYS
+PRIVACY_VERSION = "2026-11-16"
+DEFAULT_RETENTION_DAYS = 90
 
 # 登录/注册的尝试频率。按 IP 和邮箱各一桶：前者挡刷接口，后者挡单账号爆破。
 _attempt_limiter = RateLimiter(
@@ -39,11 +41,17 @@ class RegisterRequest(BaseModel):
     email: str = ""
     password: str = ""
     display_name: str = ""
+    consent: bool = False
+    consent_version: str = ""
 
 
 class LoginRequest(BaseModel):
     email: str = ""
     password: str = ""
+
+
+class ConsentRequest(BaseModel):
+    version: str = PRIVACY_VERSION
 
 
 class UserOut(BaseModel):
@@ -55,6 +63,9 @@ class UserOut(BaseModel):
     status: str
     created_at: str
     last_login_at: str | None = None
+    consent_version: str = ""
+    consent_at: str | None = None
+    consent_required: bool = False
 
 
 class AuthResponse(BaseModel):
@@ -63,6 +74,7 @@ class AuthResponse(BaseModel):
 
 
 def _public_user(user: dict) -> UserOut:
+    consent_version = user.get("consent_version") or ""
     return UserOut(
         id=user["id"],
         email=user["email"],
@@ -70,6 +82,9 @@ def _public_user(user: dict) -> UserOut:
         status=user["status"],
         created_at=user["created_at"],
         last_login_at=user.get("last_login_at"),
+        consent_version=consent_version,
+        consent_at=user.get("consent_at"),
+        consent_required=consent_version != PRIVACY_VERSION,
     )
 
 
@@ -213,6 +228,9 @@ def register(req: RegisterRequest, request: Request, response: Response):
             email=email,
             display_name=display_name,
             password_hash=security.hash_password(req.password),
+            consent_version=(req.consent_version or PRIVACY_VERSION)
+            if req.consent
+            else "",
         )
     except store.DuplicateEmail:
         raise HTTPException(status_code=409, detail="该邮箱已注册，请直接登录")
@@ -270,3 +288,24 @@ def logout(request: Request, response: Response):
 def me(user: dict = Depends(current_user)):
     """前端启动时用它判断是否已登录。"""
     return _public_user(user)
+
+
+@router.post("/consent", response_model=UserOut)
+def consent(req: ConsentRequest, user: dict = Depends(current_user)):
+    """记录用户已阅读当前版本的隐私说明。"""
+    updated = store.record_consent(user["id"], req.version or PRIVACY_VERSION)
+    if updated is None:
+        raise HTTPException(status_code=404, detail="账号不存在")
+    return _public_user(updated)
+
+
+@router.get("/privacy")
+def privacy():
+    """给前端展示的隐私说明元信息；正文在页面里维护。"""
+    retention_days = int(os.getenv("DATA_RETENTION_DAYS", str(DEFAULT_RETENTION_DAYS)))
+    return {
+        "version": PRIVACY_VERSION,
+        "retention_days": retention_days,
+        "export_endpoint": "/auth/export",
+        "delete_endpoint": "/auth/delete",
+    }

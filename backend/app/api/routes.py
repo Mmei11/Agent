@@ -8,16 +8,20 @@ import os
 import threading
 import uuid  # 生成会话 ID（UUID 随机字符串）
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timezone
 from typing import Literal
 
-from fastapi import Depends, FastAPI, HTTPException, Request  # FastAPI 框架和 HTTP 错误响应
+from fastapi import Depends, FastAPI, HTTPException, Request, Response  # FastAPI 框架和 HTTP 错误响应
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field  # 定义请求和响应的数据结构
 from sse_starlette.sse import EventSourceResponse  # Phase 6：服务端发送事件流
 
 from backend.app.agent.graph import build_graph  # 组装 LangGraph 状态图
+from backend.app.accounts import security  # 账号密码校验
 from backend.app.accounts import store as account_store  # Phase 7：会话归属
 from backend.app.api import inflight  # Phase 6 L3.3：会话在途与流计数
 from backend.app.api.accounts import (  # Phase 7：账号
+    COOKIE_NAME,
     current_user,
     optional_current_user,
 )
@@ -213,6 +217,12 @@ class ClaimSessionRequest(BaseModel):
     session_id: str
 
 
+class DeleteAccountRequest(BaseModel):
+    """删除账号前必须再次验证密码。"""
+
+    password: str
+
+
 class SessionSummary(BaseModel):
     """历史列表的一行；对话内容不在这里，点开时再 GET 完整会话。"""
 
@@ -269,6 +279,13 @@ async def create_session(
     """
     session_id = str(uuid.uuid4())  # 生成随机会话 ID，如 "a3f2b1c4-..."
     _bind_request_trace_session(session_id)
+    load_env_file()
+    if (
+        os.getenv("PRIVACY_CONSENT_REQUIRED", "0") == "1"
+        and user
+        and not user.get("consent_version")
+    ):
+        raise HTTPException(status_code=403, detail="请先阅读并同意隐私说明")
     check_message_length(req.initial_message)
     values = await _run_sync(
         _create_session_sync,
@@ -674,3 +691,79 @@ async def delete_my_session(
         await _run_sync(_delete_session_sync, session_id)
     account_store.forget_session(session_id)
     return {"session_id": session_id, "status": "deleted"}
+
+
+@app.get("/auth/export")
+async def export_my_data(user: dict = Depends(current_user)):
+    """导出账号、会话与问诊状态，供用户保存或迁移。"""
+    sessions = await _run_sync(account_store.list_sessions, user["id"], 1000)
+    exported = []
+    for row in sessions:
+        values = await _run_sync(_read_state_sync, row["session_id"])
+        exported.append(
+            {
+                "session": row,
+                "state": {
+                    key: values.get(key)
+                    for key in (
+                        "turn_id",
+                        "trace_id",
+                        "skill",
+                        "latest_user_message",
+                        "input_level",
+                        "input_labels",
+                        "conversation",
+                        "collected_facts",
+                        "fact_evidence",
+                        "missing_fields",
+                        "asked_questions",
+                        "suggested_replies",
+                        "risk_flags",
+                        "tool_results",
+                        "final_result",
+                        "rendered_text",
+                        "session_memory",
+                        "trace",
+                    )
+                },
+                "feedback": feedback_store.list_for_session(row["session_id"]),
+            }
+        )
+
+    payload = {
+        "exported_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "user": {
+            "id": user["id"],
+            "email": user["email"],
+            "display_name": user["display_name"],
+            "created_at": user["created_at"],
+            "consent_version": user.get("consent_version", ""),
+            "consent_at": user.get("consent_at"),
+        },
+        "sessions": exported,
+    }
+    return JSONResponse(
+        payload,
+        headers={
+            "Content-Disposition": 'attachment; filename="consultation-export.json"'
+        },
+    )
+
+
+@app.post("/auth/delete")
+async def delete_my_account(
+    req: DeleteAccountRequest,
+    response: Response,
+    user: dict = Depends(current_user),
+):
+    """删除账号及其全部会话；必须再次输入密码确认。"""
+    if not security.verify_password(req.password, user["password_hash"]):
+        raise HTTPException(status_code=401, detail="密码不正确，账号未删除")
+
+    session_ids = await _run_sync(account_store.delete_user, user["id"])
+    for session_id in session_ids:
+        with inflight.session_guard(session_id):
+            await _run_sync(_delete_session_sync, session_id)
+    feedback_store.delete_for_sessions(session_ids)
+    response.delete_cookie(COOKIE_NAME, path="/")
+    return {"status": "deleted", "sessions": len(session_ids)}

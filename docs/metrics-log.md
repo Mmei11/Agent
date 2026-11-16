@@ -615,6 +615,14 @@
 - 结果：M9 20 条 rule/hybrid/model 均 **1.000**；技能评测 **8/8 = 1.000**；主案例 dev **26/26**
 - 单测 **659 passed**
 
+**2026-11-16 · Phase F 第 2 课：隐私与知情同意**
+
+- `users` 增加 `consent_version / consent_at`（旧库自动补列）；注册可带同意，另有 `POST /auth/consent` 与 `GET /auth/privacy`
+- 新增 `GET /auth/export`：导出账号、完整对话、结构化字段、工具结果、trace 摘要与反馈；`POST /auth/delete`：密码确认后删除账号、checkpoint、历史行与反馈
+- 新增 `backend/app/privacy/retention.py`：按 `DATA_RETENTION_DAYS`（默认 90 天）清理过期会话，默认 dry-run，`--execute` 才删除
+- 前端：注册页增加隐私说明勾选与弹层；登录后无同意记录会先进入同意闸门；顶栏「隐私」可查看说明、导出数据、删除账号
+- 单测 **666 passed**（新增 7 条隐私测试）
+
 **2026-11-16 · Phase F 第 1 课：来源核验台账**
 
 - 删除 `src-project-derived`，换成 5 个公开来源：急诊预检分诊专家共识（2018）、就诊挂号指南（政府网站转载）、北京协和医院就医须知、国家药监局 OTC 说明书范本入口、WHO 儿童医院照护手册

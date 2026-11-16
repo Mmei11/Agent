@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import AuthScreen, { claimSession, fetchCurrentUser, logoutUser } from "./Auth.jsx";
 import HistoryDrawer from "./HistoryDrawer.jsx";
+import PrivacyPanel from "./Privacy.jsx";
 
 // 预设案例只提供快捷输入文字；实际追问、风险判断和结果都由后端决定。
 const CASES = [
@@ -212,6 +213,7 @@ export default function App() {
   const [prefillCase, setPrefillCase] = useState(null);
   const [prefillMessage, setPrefillMessage] = useState("");
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [privacyOpen, setPrivacyOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [restoring, setRestoring] = useState(Boolean(sessionId));
   const [error, setError] = useState("");
@@ -329,6 +331,26 @@ export default function App() {
     );
   }
   if (!user) return <AuthScreen onAuthed={setUser} />;
+
+  if (user.consent_required) {
+    return (
+      <div className="privacy-gate-screen">
+        <div className="brand">
+          <span className="brand-mark">✳</span>
+          <span>
+            Consult<span className="brand-light">/Lab</span>
+          </span>
+        </div>
+        <p>开始问诊前，请先阅读并同意隐私说明。</p>
+        <PrivacyPanel
+          open
+          user={user}
+          onConsented={setUser}
+          onClose={() => {}}
+        />
+      </div>
+    );
+  }
 
   // 下列值都从后端状态推导，供页面展示，不参与后端问诊决策。
   const result = state?.final_result || {};
@@ -606,6 +628,9 @@ export default function App() {
           </div>
           <button className="text-button" onClick={handleLogout}>
             退出
+          </button>
+          <button className="text-button" onClick={() => setPrivacyOpen(true)}>
+            隐私
           </button>
         </div>
       </header>
@@ -979,6 +1004,19 @@ export default function App() {
         onClose={() => setHistoryOpen(false)}
         onOpen={openHistorySession}
         onDeleted={handleHistoryDeleted}
+      />
+      <PrivacyPanel
+        open={privacyOpen}
+        user={user}
+        onClose={() => setPrivacyOpen(false)}
+        onConsented={setUser}
+        onDeleted={() => {
+          clearSession();
+          setSessionId(null);
+          setState(null);
+          setMessages([]);
+          setUser(null);
+        }}
       />
     </div>
   );

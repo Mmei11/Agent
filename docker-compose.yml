@@ -49,6 +49,9 @@ services:
       # 外部 MCP 工具：默认关闭；在 .env 里设 MCP_ENABLED=1 并配置 MCP_SERVERS。
       MCP_ENABLED: ${MCP_ENABLED:-0}
       MCP_SERVERS: ${MCP_SERVERS:-}
+      # Phase F：数据保留期与同意强制开关。
+      DATA_RETENTION_DAYS: ${DATA_RETENTION_DAYS:-90}
+      PRIVACY_CONSENT_REQUIRED: ${PRIVACY_CONSENT_REQUIRED:-0}
       # Langfuse：容器内访问宿主机用 host.docker.internal；Docker 专用变量避免
       # 与本地 uvicorn 的 LANGFUSE_HOST=127.0.0.1 冲突。
       TRACE_SINK: ${TRACE_SINK_DOCKER:-none}
