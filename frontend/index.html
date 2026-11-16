@@ -3,11 +3,48 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#f6f8f5" />
+    <meta name="theme-color" content="#f7f5f0" />
+    <meta name="color-scheme" content="light" />
+    <meta
+      name="description"
+      content="Consult/Lab 是一个虚构病例的模拟问诊工作台：展示追问、信息整理、风险分流与工具证据，仅用于演示，不提供真实医疗诊断或治疗建议。"
+    />
+    <meta name="robots" content="index,follow" />
+    <meta property="og:type" content="website" />
+    <meta property="og:locale" content="zh_CN" />
+    <meta property="og:title" content="Consult/Lab · 模拟问诊工作台" />
+    <meta
+      property="og:description"
+      content="在虚构病例中体验可追踪的问诊流程：动态追问、信息整理、风险分流和工具证据。"
+    />
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:title" content="Consult/Lab · 模拟问诊工作台" />
+    <meta
+      name="twitter:description"
+      content="在虚构病例中体验可追踪的问诊流程：动态追问、信息整理、风险分流和工具证据。"
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <title>Consult/Lab · 模拟问诊工作台</title>
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "WebApplication",
+        "name": "Consult/Lab",
+        "applicationCategory": "HealthApplication",
+        "operatingSystem": "Web",
+        "inLanguage": "zh-CN",
+        "description": "虚构病例的模拟问诊工作台，展示追问、信息整理、风险分流与工具证据；不提供真实医疗诊断或治疗建议。",
+        "isAccessibleForFree": true
+      }
+    </script>
   </head>
   <body>
     <div id="root"></div>
+    <noscript>
+      Consult/Lab 是一个虚构病例的模拟问诊工作台。请启用 JavaScript
+      以使用追问、信息整理和风险分流功能；本演示不提供真实医疗诊断或治疗建议。
+    </noscript>
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>

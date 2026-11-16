@@ -95,6 +95,7 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
             session_id TEXT PRIMARY KEY,
             user_id TEXT REFERENCES users(id) ON DELETE CASCADE,
             title TEXT NOT NULL DEFAULT '',
+            pinned INTEGER NOT NULL DEFAULT 0,
             created_at TEXT NOT NULL,
             last_active_at TEXT NOT NULL
         );
@@ -130,6 +131,14 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
         )
     if "email_verified_at" not in columns:
         conn.execute("ALTER TABLE users ADD COLUMN email_verified_at TEXT")
+
+    session_columns = {
+        row[1] for row in conn.execute("PRAGMA table_info(user_sessions)")
+    }
+    if "pinned" not in session_columns:
+        conn.execute(
+            "ALTER TABLE user_sessions ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0"
+        )
 
 
 def _user_row(row: sqlite3.Row | None) -> dict | None:
@@ -402,12 +411,53 @@ def claim_session(session_id: str, user_id: str) -> str:
 def list_sessions(user_id: str, limit: int = 50) -> list[dict]:
     with _connection() as conn:
         rows = conn.execute(
-            "SELECT session_id, title, created_at, last_active_at "
+            "SELECT session_id, title, pinned, created_at, last_active_at "
             "FROM user_sessions WHERE user_id = ? "
-            "ORDER BY last_active_at DESC, rowid DESC LIMIT ?",
+            "ORDER BY pinned DESC, last_active_at DESC, rowid DESC LIMIT ?",
             (user_id, limit),
         ).fetchall()
-    return [dict(row) for row in rows]
+    return [
+        {**dict(row), "pinned": bool(row["pinned"])}
+        for row in rows
+    ]
+
+
+def update_session(
+    session_id: str,
+    user_id: str,
+    *,
+    title: str | None = None,
+    pinned: bool | None = None,
+) -> bool:
+    """更新自己的会话标题或置顶状态；返回是否确实更新了一行。"""
+    sets: list[str] = []
+    params: list = []
+    if title is not None:
+        sets.append("title = ?")
+        params.append(make_session_title(title))
+    if pinned is not None:
+        sets.append("pinned = ?")
+        params.append(1 if pinned else 0)
+    if not sets:
+        return False
+    params.extend([session_id, user_id])
+    with _connection() as conn:
+        cursor = conn.execute(
+            f"UPDATE user_sessions SET {', '.join(sets)} "
+            "WHERE session_id = ? AND user_id = ?",
+            params,
+        )
+        return cursor.rowcount > 0
+
+
+def get_session_record(session_id: str, user_id: str) -> dict | None:
+    with _connection() as conn:
+        row = conn.execute(
+            "SELECT session_id, title, pinned, created_at, last_active_at "
+            "FROM user_sessions WHERE session_id = ? AND user_id = ?",
+            (session_id, user_id),
+        ).fetchone()
+    return {**dict(row), "pinned": bool(row["pinned"])} if row else None
 
 
 def user_owns_session(session_id: str, user_id: str) -> bool:

@@ -48,8 +48,15 @@ export async function claimSession(sessionId) {
   });
 }
 
-export async function fetchMySessions() {
-  return authRequest("/me/sessions");
+export async function fetchMySessions(limit = 50) {
+  return authRequest(`/me/sessions?limit=${encodeURIComponent(limit)}`);
+}
+
+export async function updateMySession(sessionId, patch) {
+  return authRequest("/me/sessions/" + encodeURIComponent(sessionId), {
+    method: "PATCH",
+    body: JSON.stringify(patch),
+  });
 }
 
 export async function deleteMySession(sessionId) {
@@ -327,9 +334,7 @@ export default function AuthScreen({ onAuthed }) {
               </button>
             )}
 
-            {resetNotice && (
-              <p className="auth-notice-inline">{resetNotice}</p>
-            )}
+            {resetNotice && <p className="auth-notice-inline">{resetNotice}</p>}
 
             {error && (
               <div className="auth-error" role="alert">

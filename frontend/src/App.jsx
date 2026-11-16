@@ -214,6 +214,9 @@ export default function App() {
   const [prefillCase, setPrefillCase] = useState(null);
   const [prefillMessage, setPrefillMessage] = useState("");
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [narrow, setNarrow] = useState(
+    () => window.matchMedia("(max-width: 980px)").matches,
+  );
   const [privacyOpen, setPrivacyOpen] = useState(false);
   const [verifyOpen, setVerifyOpen] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -257,6 +260,17 @@ export default function App() {
     return () => {
       cancelled = true;
     };
+  }, []);
+
+  // 桌面端历史在侧栏内展开；窄屏继续使用右侧抽屉。
+  useEffect(() => {
+    const query = window.matchMedia("(max-width: 980px)");
+    const onChange = (event) => {
+      setNarrow(event.matches);
+      if (event.matches) setHistoryOpen(false);
+    };
+    query.addEventListener("change", onChange);
+    return () => query.removeEventListener("change", onChange);
   }, []);
 
   // 登录后把本机上的游客会话归到账号；失败不影响继续使用。
@@ -344,12 +358,7 @@ export default function App() {
           </span>
         </div>
         <p>开始问诊前，请先阅读并同意隐私说明。</p>
-        <PrivacyPanel
-          open
-          user={user}
-          onConsented={setUser}
-          onClose={() => {}}
-        />
+        <PrivacyPanel open user={user} onConsented={setUser} onClose={() => {}} />
       </div>
     );
   }
@@ -524,7 +533,7 @@ export default function App() {
       setPrefillMessage("");
       freshNext.current = false;
       setFeedbackStatus("");
-      setHistoryOpen(false);
+      if (narrow) setHistoryOpen(false);
       requestAnimationFrame(() => scrollChat("auto"));
     } catch {
       setError("会话加载失败，请稍后重试。");
@@ -601,380 +610,535 @@ export default function App() {
     }
   }
 
+  const greeting = (() => {
+    // 按北京时间（Asia/Shanghai）计算，不依赖浏览器所在时区。
+    const hourText = new Intl.DateTimeFormat("en-US", {
+      timeZone: "Asia/Shanghai",
+      hour: "2-digit",
+      hourCycle: "h23",
+    }).format(new Date());
+    const hour = Number(hourText) % 24;
+    if (hour < 6) return "夜深了";
+    if (hour < 12) return "上午好";
+    if (hour < 18) return "下午好";
+    return "晚上好";
+  })();
+  const displayName = user.display_name?.trim() || "朋友";
+  const hasConversation = Boolean(sessionId) || messages.length > 0 || restoring;
+
+  function handleNewSession() {
+    if (loading || restoring) return;
+    handleReset();
+    requestAnimationFrame(() => {
+      composerRef.current?.focus({ preventScroll: true });
+    });
+  }
+
+  function clearPrefill() {
+    setPrefillCase(null);
+    setPrefillMessage("");
+    setActiveCase(null);
+    requestAnimationFrame(() => {
+      composerRef.current?.focus({ preventScroll: true });
+    });
+  }
+
+  function renderComposer(variant = "docked") {
+    const hero = variant === "hero";
+    return (
+      <div
+        className={
+          "composer-zone " + (hero ? "composer-zone-hero" : "composer-zone-docked")
+        }
+      >
+        {prefillCase && !input.trim() && !loading && (
+          <div className="case-prefill-note" role="status">
+            <span aria-hidden="true">✎</span>
+            <span className="prefill-text">
+              已选择「{prefillCase}」案例，直接发送即可，或输入自己的描述。
+            </span>
+            <button
+              type="button"
+              className="prefill-close"
+              onClick={clearPrefill}
+              aria-label="关闭已选案例提示"
+            >
+              ×
+            </button>
+          </div>
+        )}
+        {error && (
+          <div className="request-error" role="alert">
+            {error}
+          </div>
+        )}
+        {hasResult && !hero && (
+          <div className="new-session-note">
+            本轮已结束，可以继续追问；输入药品名称可查 OTC 说明书。
+          </div>
+        )}
+        <div className="composer">
+          <textarea
+            ref={composerRef}
+            value={input}
+            onChange={(event) => setInput(event.target.value)}
+            onKeyDown={(event) => {
+              if (
+                event.key === "Enter" &&
+                !event.shiftKey &&
+                !event.nativeEvent.isComposing
+              ) {
+                event.preventDefault();
+                handleSend();
+              }
+            }}
+            placeholder={
+              prefillMessage ||
+              (hero
+                ? "描述一个虚构病例，或从一个场景开始…"
+                : "描述一个虚构病例，或补充上一轮回答…")
+            }
+            aria-label="输入模拟病例描述"
+            rows={hero ? 3 : 2}
+            disabled={loading || restoring}
+          />
+          <button
+            className="send-button"
+            onClick={() => handleSend()}
+            disabled={(!input.trim() && !prefillMessage) || loading || restoring}
+            aria-label="发送消息"
+          >
+            {loading ? "处理中…" : "发送"} <span aria-hidden="true">↗</span>
+          </button>
+        </div>
+        <div className="composer-hint">Enter 发送 · Shift + Enter 换行</div>
+      </div>
+    );
+  }
+
   return (
-    <div className="app-shell">
-      {/* 顶部品牌与页面介绍是静态内容，不随会话变化。 */}
-      <header className="topbar">
-        <div className="brand">
-          <span className="brand-mark">✳</span>
+    <div className="claude-shell">
+      <a className="skip-link" href="#main-content">
+        跳到主要内容
+      </a>
+
+      <aside className="app-sidebar" aria-label="工作台导航">
+        <a
+          className="sidebar-brand"
+          href="/"
+          onClick={(event) => {
+            event.preventDefault();
+            handleNewSession();
+          }}
+          aria-label="Consult/Lab 首页"
+        >
+          <span className="brand-mark" aria-hidden="true">
+            ✳
+          </span>
           <span>
             Consult<span className="brand-light">/Lab</span>
           </span>
-        </div>
-        <div className="topbar-account">
-          <span className="topbar-meta">DAY 15 · INTERACTIVE DEMO</span>
+        </a>
+
+        <button
+          className="sidebar-new"
+          type="button"
+          onClick={handleNewSession}
+          disabled={loading || restoring}
+        >
+          <span aria-hidden="true">＋</span> 新建问诊
+        </button>
+
+        <nav className="sidebar-nav" aria-label="主要导航">
+          {!narrow && (
+            <HistoryDrawer
+              inline
+              open
+              refreshToken={`${sessionId || ""}:${state?.turn_id || messages.length}`}
+              currentSessionId={sessionId}
+              onClose={() => {}}
+              onOpen={openHistorySession}
+              onDeleted={handleHistoryDeleted}
+            />
+          )}
+
+          {user.email_verified === false && (
+            <button type="button" onClick={() => setVerifyOpen(true)}>
+              <span className="nav-icon" aria-hidden="true">
+                ✉
+              </span>
+              验证邮箱
+              <span className="nav-badge">待验证</span>
+            </button>
+          )}
+        </nav>
+
+        <div className="sidebar-bottom">
+          <div className="sidebar-bottom-divider" aria-hidden="true" />
           <button
-            className="text-button"
-            onClick={() => setHistoryOpen(true)}
-            disabled={loading || restoring}
+            className="sidebar-bottom-link"
+            type="button"
+            onClick={() => setPrivacyOpen(true)}
           >
-            历史
-          </button>
-          <div className="user-chip">
-            <span className="user-avatar" aria-hidden="true">
-              {user.display_name.trim().charAt(0).toUpperCase() || "U"}
+            <span className="nav-icon" aria-hidden="true">
+              ◇
             </span>
-            <span className="user-name" title={user.email}>
-              {user.display_name}
+            隐私与数据
+          </button>
+          <div className="sidebar-user">
+            <span className="sidebar-avatar" aria-hidden="true">
+              {displayName.charAt(0).toUpperCase()}
             </span>
-          </div>
-          <button className="text-button" onClick={handleLogout}>
-            退出
-          </button>
-          <button className="text-button" onClick={() => setPrivacyOpen(true)}>
-            隐私
-          </button>
-        </div>
-      </header>
-      {user.email_verified === false && (
-        <div className="verify-banner">
-          <span>邮箱未验证。验证后可用于找回密码。</span>
-          <button className="text-button" onClick={() => setVerifyOpen(true)}>
-            去验证
-          </button>
-        </div>
-      )}
-      <main className="page-content">
-        <section className="intro" aria-labelledby="page-title">
-          <div className="eyebrow">
-            <span className="eyebrow-dot" /> 模拟问诊工作台
-          </div>
-          <h1 id="page-title">
-            让每一步问诊，
-            <br />
-            <span>都有迹可循。</span>
-          </h1>
-          <p>
-            选择一个演示场景，或输入虚构病例。
-            系统会展示追问、信息整理与预设风险分流的过程。
-          </p>
-          <div className="notice">
-            <span aria-hidden="true">ⓘ</span>
-            <span>仅限虚构病例演示，不提供真实医疗诊断、治疗或用药指导。</span>
-          </div>
-        </section>
-
-        <section className="scenarios" aria-labelledby="scenario-title">
-          <div className="section-heading">
-            <div>
-              <span className="section-kicker">QUICK START</span>
-              <h2 id="scenario-title">选择演示场景</h2>
+            <div className="sidebar-user-info">
+              <strong>{displayName}</strong>
+              <span title={user.email}>{user.email}</span>
             </div>
-            <span className="section-caption">每次选择都会开启独立会话</span>
-          </div>
-          <div className="scenario-grid">
-            {/* 点选场景只预填输入框，发送时机交给用户。 */}
-            {CASES.map((item) => (
-              <button
-                key={item.id}
-                className={
-                  "scenario-card" + (activeCase === item.title ? " selected" : "")
-                }
-                onClick={() => handlePickCase(item)}
-                disabled={loading || restoring}
-              >
-                <span className="scenario-number">{item.id}</span>
-                <span className="scenario-title">
-                  {item.title}
-                  <span className="scenario-arrow" aria-hidden="true">
-                    ↗
-                  </span>
-                </span>
-                <span className="scenario-description">{item.detail}</span>
-              </button>
-            ))}
-          </div>
-        </section>
-
-        <section className="workspace" aria-label="问诊演示工作台">
-          <div className="chat-panel">
-            <div className="panel-header">
-              <div>
-                <span className="section-kicker">CONVERSATION</span>
-                <h2>对话记录</h2>
-              </div>
-              <div className="panel-actions">
-                <span className={"phase-pill" + (isRisk ? " phase-risk" : "")}>
-                  <span className="phase-dot" />
-                  {phase}
-                </span>
-                <button
-                  className="text-button"
-                  onClick={handleReset}
-                  disabled={loading || restoring}
-                >
-                  重新开始
-                </button>
-              </div>
-            </div>
-            {/* role="log" 和 aria-live 让辅助技术读到新增的对话内容。 */}
-            <div
-              className="chat-stream"
-              role="log"
-              aria-live="polite"
-              aria-relevant="additions text"
+            <button
+              className="sidebar-logout"
+              type="button"
+              onClick={handleLogout}
+              aria-label="退出登录"
             >
-              {/* 恢复中、空会话和已有消息分别显示不同内容。 */}
-              {restoring ? (
-                <div className="empty-chat">正在恢复会话…</div>
-              ) : messages.length === 0 ? (
-                <div className="empty-chat">
-                  <div className="empty-icon">✳</div>
-                  <h3>从一个模拟案例开始</h3>
-                  <p>上方选择场景，或在下方输入虚构人物的症状描述。</p>
+              退出
+            </button>
+          </div>
+        </div>
+      </aside>
+
+      <div className="app-main">
+        <header className="mobile-topbar">
+          <a
+            className="sidebar-brand"
+            href="/"
+            onClick={(event) => {
+              event.preventDefault();
+              handleNewSession();
+            }}
+          >
+            <span className="brand-mark" aria-hidden="true">
+              ✳
+            </span>
+            <span>
+              Consult<span className="brand-light">/Lab</span>
+            </span>
+          </a>
+          <div className="mobile-actions">
+            <button
+              type="button"
+              onClick={handleNewSession}
+              disabled={loading || restoring}
+            >
+              新建
+            </button>
+            <button
+              type="button"
+              onClick={() => setHistoryOpen(true)}
+              disabled={loading || restoring}
+            >
+              历史
+            </button>
+            <button type="button" onClick={() => setPrivacyOpen(true)}>
+              隐私
+            </button>
+            <button type="button" onClick={handleLogout}>
+              退出
+            </button>
+          </div>
+        </header>
+
+        {user.email_verified === false && (
+          <div className="verify-banner" role="status">
+            <span>邮箱未验证。验证后可用于找回密码。</span>
+            <button
+              className="text-button"
+              type="button"
+              onClick={() => setVerifyOpen(true)}
+            >
+              去验证
+            </button>
+          </div>
+        )}
+
+        <main id="main-content" className="app-content">
+          {!hasConversation ? (
+            <section className="home-stage" aria-labelledby="home-title">
+              <div className="home-copy">
+                <h1 id="home-title" className="home-greeting">
+                  <span className="home-star" aria-hidden="true">
+                    ✳
+                  </span>
+                  {greeting}，{displayName}
+                </h1>
+                <p className="home-subtitle">
+                  今天想了解什么？描述一个虚构病例，或从下面的场景开始。
+                </p>
+              </div>
+
+              {renderComposer("hero")}
+
+              <section className="quick-start" aria-labelledby="quick-start-title">
+                <div className="quick-start-head">
+                  <h2 id="quick-start-title">快速开始</h2>
+                  <span>每次选择都会开启独立会话</span>
                 </div>
-              ) : (
-                messages.map((item, index) => (
-                  <div
-                    className={
-                      "message-row " +
-                      (item.role === "user" ? "from-user" : "from-agent")
-                    }
-                    key={index}
-                  >
-                    <div
-                      className={
-                        "avatar " +
-                        (item.role === "user" ? "user-avatar" : "agent-avatar")
-                      }
-                    >
-                      {item.role === "user" ? "我" : "✳"}
-                    </div>
-                    <div className="message-content">
-                      <div className="message-label">
-                        {item.role === "user" ? "模拟用户" : "问诊 Agent"}
-                      </div>
-                      {/* 只有真正的风险结果消息才用风险样式，后续追问不再套用。 */}
-                      <div
-                        className={
-                          "message-bubble" +
-                          (isRisk &&
-                          result.risk_message &&
-                          item.role === "agent" &&
-                          item.text.includes(result.risk_message)
-                            ? " risk-bubble"
-                            : "")
-                        }
-                      >
-                        <AgentText
-                          text={item.text}
-                          animate={item.role === "agent" && index === animatedIndex}
-                          onReveal={() => scrollChat("auto")}
-                        />
-                      </div>
-                    </div>
-                  </div>
-                ))
-              )}
-              {/* 追问的快捷回答：点一下直接发送，输入框仍可自由输入。 */}
-              {!loading && !hasResult && suggestedReplies.length > 0 && (
-                <div className="reply-chips">
-                  {suggestedReplies.map((reply) => (
+                <div className="quick-row" role="group" aria-label="演示场景">
+                  {CASES.map((item) => (
                     <button
-                      key={reply}
-                      className="reply-chip"
-                      onClick={() => handleSend(reply)}
+                      key={item.id}
+                      className={
+                        "quick-chip" + (activeCase === item.title ? " selected" : "")
+                      }
+                      onClick={() => handlePickCase(item)}
+                      disabled={loading || restoring}
+                      aria-pressed={activeCase === item.title}
+                    >
+                      <span className="quick-number">{item.id}</span>
+                      <span className="quick-copy">
+                        <strong>{item.title}</strong>
+                        <small>{item.detail}</small>
+                      </span>
+                      <span className="quick-arrow" aria-hidden="true">
+                        ↗
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </section>
+
+              <p className="home-notice">
+                <span aria-hidden="true">ⓘ</span>
+                仅限虚构病例演示，不提供真实医疗诊断、治疗或用药指导。
+              </p>
+            </section>
+          ) : (
+            <section className="conversation-stage" aria-label="问诊对话">
+              <div className="chat-column">
+                <div className="conversation-header">
+                  <div>
+                    <span className="section-kicker">CONVERSATION</span>
+                    <h1>问诊对话</h1>
+                  </div>
+                  <div className="panel-actions">
+                    <span className={"phase-pill" + (isRisk ? " phase-risk" : "")}>
+                      <span className="phase-dot" />
+                      {phase}
+                    </span>
+                    <button
+                      className="text-button"
+                      type="button"
+                      onClick={handleReset}
                       disabled={loading || restoring}
                     >
-                      {reply}
+                      重新开始
                     </button>
-                  ))}
-                </div>
-              )}
-              {/* 等待接口响应时显示临时提示，收到结果后由真实对话替换。 */}
-              {loading && (
-                <div className="message-row from-agent">
-                  <div className="avatar agent-avatar">✳</div>
-                  <div className="message-content">
-                    <div className="message-label">问诊 Agent</div>
-                    <div className="message-bubble typing">
-                      正在{NODE_LABELS[currentNode] || "整理信息"}…
-                    </div>
                   </div>
                 </div>
-              )}
-              <div ref={chatEnd} />
-            </div>
-            <div className="composer-wrap">
-              {/* 预填提示：告诉用户案例已经放进输入框，发送与否由自己决定。 */}
-              {prefillCase && !input.trim() && !loading && (
-                <div className="case-prefill-note">
-                  <span aria-hidden="true">✎</span>
-                  已选择「{prefillCase}」案例，直接发送即可，或输入自己的描述。
-                </div>
-              )}
-              {/* 错误在输入框上方提示；会话结束后说明下一次发送会自动重开。 */}
-              {error && (
-                <div className="request-error" role="alert">
-                  {error}
-                </div>
-              )}
-              {hasResult && (
-                <div className="new-session-note">
-                  本轮已结束，可以继续追问；输入药品名称可查 OTC 说明书。
-                </div>
-              )}
-              <div className="composer">
-                <textarea
-                  ref={composerRef}
-                  value={input}
-                  onChange={(event) => setInput(event.target.value)}
-                  onKeyDown={(event) => {
-                    // Enter 发送；Shift+Enter 换行；中文输入法组字时不误发送。
-                    if (
-                      event.key === "Enter" &&
-                      !event.shiftKey &&
-                      !event.nativeEvent.isComposing
-                    ) {
-                      event.preventDefault();
-                      handleSend();
-                    }
-                  }}
-                  placeholder={prefillMessage || "描述一个虚构病例，或补充上一轮回答…"}
-                  aria-label="输入模拟病例描述"
-                  rows={2}
-                  disabled={loading || restoring}
-                />
-                <button
-                  className="send-button"
-                  onClick={() => handleSend()}
-                  disabled={(!input.trim() && !prefillMessage) || loading || restoring}
-                  aria-label="发送消息"
-                >
-                  发送 <span aria-hidden="true">↗</span>
-                </button>
-              </div>
-              <div className="composer-hint">Enter 发送 · Shift + Enter 换行</div>
-            </div>
-          </div>
 
-          {/* 右侧面板只读取后端返回的状态，展示追问进度和整理结果。 */}
-          <aside className="insight-panel" aria-label="会话状态与结果">
-            <div className="insight-header">
-              <span className="section-kicker">LIVE STATE</span>
-              <h2>当前会话</h2>
-              <p>信息会随每轮回答更新，并保存在本地会话库中。</p>
-              <button
-                className="memory-button"
-                onClick={openMemory}
-                disabled={!sessionId || loading || restoring}
-              >
-                查看记忆
-              </button>
-            </div>
-            <div className="progress-block">
-              <div className="progress-title">
-                <span>追问进度</span>
-                <strong>
-                  {followupCount}
-                  <span> / 3</span>
-                </strong>
-              </div>
-              <div className="progress-track">
-                <span style={{ width: (followupCount / 3) * 100 + "%" }} />
-              </div>
-              <p>每次只提出一个问题，最多追问三次。</p>
-            </div>
-            <div className="insight-section">
-              <h3>
-                已收集信息 <span>{facts.length}</span>
-              </h3>
-              {facts.length ? (
-                <div className="fact-list">
-                  {facts.map(([field, values]) => (
-                    <div className="fact-item" key={field}>
-                      <span>{field}</span>
-                      <strong>{values.join("、")}</strong>
+                <div
+                  className="chat-stream"
+                  role="log"
+                  aria-live="polite"
+                  aria-relevant="additions text"
+                >
+                  {restoring ? (
+                    <div className="empty-chat">正在恢复会话…</div>
+                  ) : messages.length === 0 ? (
+                    <div className="empty-chat">
+                      <div className="empty-icon">✳</div>
+                      <h3>描述一个虚构病例</h3>
+                      <p>在下方输入症状，系统会展示追问、信息整理与风险分流。</p>
                     </div>
-                  ))}
+                  ) : (
+                    messages.map((item, index) => (
+                      <div
+                        className={
+                          "message-row " +
+                          (item.role === "user" ? "from-user" : "from-agent")
+                        }
+                        key={index}
+                      >
+                        <div
+                          className={
+                            "avatar " +
+                            (item.role === "user" ? "user-avatar" : "agent-avatar")
+                          }
+                        >
+                          {item.role === "user" ? "我" : "✳"}
+                        </div>
+                        <div className="message-content">
+                          <div className="message-label">
+                            {item.role === "user" ? "模拟用户" : "问诊 Agent"}
+                          </div>
+                          <div
+                            className={
+                              "message-bubble" +
+                              (isRisk &&
+                              result.risk_message &&
+                              item.role === "agent" &&
+                              item.text.includes(result.risk_message)
+                                ? " risk-bubble"
+                                : "")
+                            }
+                          >
+                            <AgentText
+                              text={item.text}
+                              animate={item.role === "agent" && index === animatedIndex}
+                              onReveal={() => scrollChat("auto")}
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    ))
+                  )}
+
+                  {!loading && !hasResult && suggestedReplies.length > 0 && (
+                    <div className="reply-chips">
+                      {suggestedReplies.map((reply) => (
+                        <button
+                          key={reply}
+                          className="reply-chip"
+                          onClick={() => handleSend(reply)}
+                          disabled={loading || restoring}
+                        >
+                          {reply}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
+                  {loading && (
+                    <div className="message-row from-agent">
+                      <div className="avatar agent-avatar">✳</div>
+                      <div className="message-content">
+                        <div className="message-label">问诊 Agent</div>
+                        <div className="message-bubble typing">
+                          正在{NODE_LABELS[currentNode] || "整理信息"}…
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                  <div ref={chatEnd} />
                 </div>
-              ) : (
-                <p className="muted">开始演示后，这里会显示已识别的信息。</p>
-              )}
-            </div>
-            <div className="insight-section">
-              <h3>
-                尚待确认 <span>{missing.length}</span>
-              </h3>
-              {missing.length ? (
-                <div className="chip-list">
-                  {missing.map((field) => (
-                    <span className="chip" key={field}>
-                      {field}
-                    </span>
-                  ))}
-                </div>
-              ) : (
-                <p className="muted">暂无待确认字段。</p>
-              )}
-            </div>
-            {/* 有风险标记时单独提示；最终结果只展示后端明确提供的字段。 */}
-            {state?.risk_flags?.length > 0 && (
-              <div className="risk-alert">
-                <span className="risk-alert-label">预设规则已触发</span>
-                <strong>{state.risk_flags.join("、")}</strong>
-                <p>本轮已转入固定风险提示。</p>
+
+                {renderComposer("docked")}
               </div>
-            )}
-            {hasResult && (
-              <div className={"result-summary" + (isRisk ? " result-risk" : "")}>
-                <span className="section-kicker">SESSION RESULT</span>
-                <h3>
-                  {isRisk
-                    ? "风险提示"
-                    : result.status === "completed"
-                      ? "整理结果"
-                      : "处理状态"}
-                </h3>
-                {result.next_step && <p className="result-next">{result.next_step}</p>}
-                {result.risk_message && <p>{result.risk_message}</p>}
-                {result.tools_used?.length > 0 && (
-                  <div className="result-tools">
-                    已调用工具：{result.tools_used.join("、")}
+
+              <aside className="insight-panel" aria-label="会话状态与结果">
+                <div className="insight-header">
+                  <span className="section-kicker">LIVE STATE</span>
+                  <h2>当前会话</h2>
+                  <p>信息会随每轮回答更新，并保存在本地会话库中。</p>
+                  <button
+                    className="memory-button"
+                    onClick={openMemory}
+                    disabled={!sessionId || loading || restoring}
+                  >
+                    查看记忆
+                  </button>
+                </div>
+                <div className="progress-block">
+                  <div className="progress-title">
+                    <span>追问进度</span>
+                    <strong>
+                      {followupCount}
+                      <span> / 3</span>
+                    </strong>
+                  </div>
+                  <div className="progress-track">
+                    <span style={{ width: (followupCount / 3) * 100 + "%" }} />
+                  </div>
+                  <p>每次只提出一个问题，最多追问三次。</p>
+                </div>
+                <div className="insight-section">
+                  <h3>
+                    已收集信息 <span>{facts.length}</span>
+                  </h3>
+                  {facts.length ? (
+                    <div className="fact-list">
+                      {facts.map(([field, values]) => (
+                        <div className="fact-item" key={field}>
+                          <span>{field}</span>
+                          <strong>{values.join("、")}</strong>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="muted">开始演示后，这里会显示已识别的信息。</p>
+                  )}
+                </div>
+                <div className="insight-section">
+                  <h3>
+                    尚待确认 <span>{missing.length}</span>
+                  </h3>
+                  {missing.length ? (
+                    <div className="chip-list">
+                      {missing.map((field) => (
+                        <span className="chip" key={field}>
+                          {field}
+                        </span>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="muted">暂无待确认字段。</p>
+                  )}
+                </div>
+                {state?.risk_flags?.length > 0 && (
+                  <div className="risk-alert">
+                    <span className="risk-alert-label">预设规则已触发</span>
+                    <strong>{state.risk_flags.join("、")}</strong>
+                    <p>本轮已转入固定风险提示。</p>
                   </div>
                 )}
-                {feedbackStatus === "done" ? (
-                  <p className="feedback-done">已收到反馈，谢谢</p>
-                ) : (
-                  <div className="feedback-row">
-                    <button
-                      className="feedback-button"
-                      onClick={() => submitFeedback("helpful")}
-                      disabled={feedbackStatus === "sending"}
-                    >
-                      有帮助
-                    </button>
-                    <button
-                      className="feedback-button"
-                      onClick={() => submitFeedback("unhelpful")}
-                      disabled={feedbackStatus === "sending"}
-                    >
-                      没帮助
-                    </button>
-                    {feedbackStatus === "error" && (
-                      <span className="feedback-error">提交失败，稍后重试</span>
+                {hasResult && (
+                  <div className={"result-summary" + (isRisk ? " result-risk" : "")}>
+                    <span className="section-kicker">SESSION RESULT</span>
+                    <h3>
+                      {isRisk
+                        ? "风险提示"
+                        : result.status === "completed"
+                          ? "整理结果"
+                          : "处理状态"}
+                    </h3>
+                    {result.next_step && (
+                      <p className="result-next">{result.next_step}</p>
+                    )}
+                    {result.risk_message && <p>{result.risk_message}</p>}
+                    {result.tools_used?.length > 0 && (
+                      <div className="result-tools">
+                        已调用工具：{result.tools_used.join("、")}
+                      </div>
+                    )}
+                    {feedbackStatus === "done" ? (
+                      <p className="feedback-done">已收到反馈，谢谢</p>
+                    ) : (
+                      <div className="feedback-row">
+                        <button
+                          className="feedback-button"
+                          onClick={() => submitFeedback("helpful")}
+                          disabled={feedbackStatus === "sending"}
+                        >
+                          有帮助
+                        </button>
+                        <button
+                          className="feedback-button"
+                          onClick={() => submitFeedback("unhelpful")}
+                          disabled={feedbackStatus === "sending"}
+                        >
+                          没帮助
+                        </button>
+                        {feedbackStatus === "error" && (
+                          <span className="feedback-error">提交失败，稍后重试</span>
+                        )}
+                      </div>
                     )}
                   </div>
                 )}
-              </div>
-            )}
-          </aside>
-        </section>
-        <footer>
-          CONSULT / LAB <span>·</span> 虚构病例交互演示
-          <span className="build-tag">BUILD {__BUILD_ID__}</span>
-        </footer>
-      </main>
+              </aside>
+            </section>
+          )}
+        </main>
+      </div>
+
       {memoryOpen && (
         <div
           className="memory-overlay"
@@ -1009,7 +1173,7 @@ export default function App() {
         </div>
       )}
       <HistoryDrawer
-        open={historyOpen}
+        open={historyOpen && narrow}
         currentSessionId={sessionId}
         onClose={() => setHistoryOpen(false)}
         onOpen={openHistorySession}

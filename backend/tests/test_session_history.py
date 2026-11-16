@@ -150,3 +150,49 @@ def test_history_limit_is_capped():
     assert len(history(client)) == 3
     assert len(client.get("/me/sessions?limit=2").json()) == 2
     assert len(client.get("/me/sessions?limit=999").json()) == 3
+
+
+def test_rename_session_updates_title():
+    client = account_client()
+    sid = create_session(client, "头部不适")
+
+    resp = client.patch(f"/me/sessions/{sid}", json={"title": "偏头痛记录"})
+
+    assert resp.status_code == 200
+    assert resp.json()["title"] == "偏头痛记录"
+    assert history(client)[0]["title"] == "偏头痛记录"
+
+
+def test_rename_rejects_empty_title():
+    client = account_client()
+    sid = create_session(client, "头部不适")
+
+    resp = client.patch(f"/me/sessions/{sid}", json={"title": "  "})
+
+    assert resp.status_code == 400
+
+
+def test_pinned_session_sorts_first_and_can_be_unpinned():
+    client = account_client()
+    first = create_session(client, "头部不适")
+    second = create_session(client, "腹痛三天")
+    assert [item["session_id"] for item in history(client)] == [second, first]
+
+    assert client.patch(f"/me/sessions/{first}", json={"pinned": True}).status_code == 200
+    items = history(client)
+    assert [item["session_id"] for item in items] == [first, second]
+    assert items[0]["pinned"] is True
+
+    assert client.patch(f"/me/sessions/{first}", json={"pinned": False}).status_code == 200
+    assert [item["session_id"] for item in history(client)] == [second, first]
+
+
+def test_cannot_update_another_users_session():
+    owner = account_client("owner@example.com")
+    sid = create_session(owner, "头部不适")
+
+    intruder = account_client("intruder@example.com")
+    resp = intruder.patch(f"/me/sessions/{sid}", json={"title": "越权修改"})
+
+    assert resp.status_code == 404
+    assert owner.get("/me/sessions").json()[0]["title"].startswith("头部不适")

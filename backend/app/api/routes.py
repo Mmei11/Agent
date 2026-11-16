@@ -9,6 +9,7 @@ import threading
 import uuid  # 生成会话 ID（UUID 随机字符串）
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
+from functools import partial
 from typing import Literal
 
 from fastapi import Depends, FastAPI, HTTPException, Request, Response  # FastAPI 框架和 HTTP 错误响应
@@ -228,8 +229,16 @@ class SessionSummary(BaseModel):
 
     session_id: str
     title: str = ""
+    pinned: bool = False
     created_at: str
     last_active_at: str
+
+
+class UpdateSessionRequest(BaseModel):
+    """只允许改自己的会话标题或置顶状态。"""
+
+    title: str | None = Field(default=None, max_length=80)
+    pinned: bool | None = None
 
 
 class SessionResponse(BaseModel):
@@ -675,6 +684,39 @@ async def claim_my_session(
     if result == "conflict":
         raise HTTPException(status_code=409, detail="该会话已属于其他账号")
     return {"session_id": req.session_id, "claimed": result == "claimed"}
+
+
+@app.patch("/me/sessions/{session_id}", response_model=SessionSummary)
+async def update_my_session(
+    session_id: str,
+    req: UpdateSessionRequest,
+    user: dict = Depends(current_user),
+):
+    """重命名或置顶自己的会话。"""
+    if req.title is None and req.pinned is None:
+        raise HTTPException(status_code=400, detail="没有需要更新的字段")
+    title = req.title.strip() if req.title is not None else None
+    if req.title is not None and not title:
+        raise HTTPException(status_code=400, detail="标题不能为空")
+
+    ok = await _run_sync(
+        partial(
+            account_store.update_session,
+            session_id,
+            user["id"],
+            title=title,
+            pinned=req.pinned,
+        )
+    )
+    if not ok:
+        raise HTTPException(status_code=404, detail="会话不存在")
+
+    record = await _run_sync(
+        account_store.get_session_record, session_id, user["id"]
+    )
+    if record is None:
+        raise HTTPException(status_code=404, detail="会话不存在")
+    return record
 
 
 @app.delete("/me/sessions/{session_id}")
