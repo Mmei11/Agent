@@ -42,9 +42,20 @@ ABSENCE_PATTERN = re.compile(
     r"(?:暂无|没有|无|没)(?:任何|明显|其他|其它|别的|别的什么)*(?:不舒服|症状|不适)"
 )
 
+# 明确否认既往病史也是“已知背景”，模型偶尔会把它当否定丢掉。
+BACKGROUND_ABSENCE_PATTERN = re.compile(
+    r"(?:无|没有|否认|未有|无任何)[^，。；\n]{0,8}"
+    r"(?:病史|既往史|慢性病|基础病|过敏史)"
+)
+
 
 def extract_absence_phrase(message: str) -> str | None:
     match = ABSENCE_PATTERN.search(message)
+    return match.group(0) if match else None
+
+
+def extract_background_absence_phrase(message: str) -> str | None:
+    match = BACKGROUND_ABSENCE_PATTERN.search(message)
     return match.group(0) if match else None
 
 
@@ -57,6 +68,19 @@ def _merge_absence_fact(facts: dict, evidence: dict, message: str) -> None:
         return
     facts[ABSENCE_FIELD] = [phrase]
     evidence.setdefault(ABSENCE_FIELD, []).append(phrase)
+
+
+def _merge_background_absence_fact(
+    facts: dict, evidence: dict, message: str
+) -> None:
+    """模型漏掉“无病史”时，用原文补回已知背景。"""
+    if "已知背景" in facts:
+        return
+    phrase = extract_background_absence_phrase(message)
+    if phrase is None:
+        return
+    facts["已知背景"] = [phrase]
+    evidence.setdefault("已知背景", []).append(phrase)
 
 
 
@@ -94,6 +118,7 @@ def extract_facts_auto(message: str, meta: dict | None = None) -> tuple[dict, di
             facts, evidence, usage = extract_facts_with_meta(message)
             # 模型的否定闸门会丢掉"暂无其他不适"；这里按原文补回。
             _merge_absence_fact(facts, evidence, message)
+            _merge_background_absence_fact(facts, evidence, message)
             if meta is not None:
                 meta.update(
                     {

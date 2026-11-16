@@ -23,6 +23,9 @@ os.environ.setdefault("KNOWLEDGE_BACKEND", "stub")
 os.environ.setdefault("MCP_ENABLED", "0")
 os.environ.setdefault("SKILLS_ENABLED", "1")
 os.environ.setdefault("TRACE_SINK", "none")
+# 技能评测只测路由/流程，不受语义分诊和输出审查影响。
+os.environ.setdefault("SEMANTIC_RISK_ENABLED", "0")
+os.environ.setdefault("CRITIC_ENABLED", "0")
 
 DEFAULT_OUTPUT = Path("eval/results/skill-eval")
 
@@ -87,6 +90,11 @@ def main() -> int:
     parser.add_argument("--cases-dir", type=Path, default=Path("skills"))
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT)
     parser.add_argument("--min-accuracy", type=float, default=0.9)
+    parser.add_argument(
+        "--use-model",
+        action="store_true",
+        help="用真实模型跑；不传时使用 mock（也可提前设 USE_MODEL=1）",
+    )
     args = parser.parse_args()
 
     from backend.app.agent.graph import build_graph

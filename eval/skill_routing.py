@@ -3,7 +3,7 @@
 支持三种路由模式：
     uv run python -m eval.skill_routing                 # hybrid（默认）
     uv run python -m eval.skill_routing --mode rule
-    USE_MODEL=1 uv run python -m eval.skill_routing --mode model
+    uv run python -m eval.skill_routing --mode model --use-model
 
 报告按技能和 split 分组，便于确认 dev/holdout 是否一致。
 """
@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
 from typing import Any, Callable
 
@@ -88,8 +89,22 @@ def main() -> int:
     parser.add_argument(
         "--mode", choices=["rule", "model", "hybrid"], default="hybrid"
     )
+    parser.add_argument(
+        "--use-model",
+        action="store_true",
+        help="model 模式下必须显式开启；等价于 USE_MODEL=1",
+    )
     parser.add_argument("--min-accuracy", type=float, default=0.9)
     args = parser.parse_args()
+
+    if args.use_model:
+        os.environ["USE_MODEL"] = "1"
+    if args.mode == "model" and os.getenv("USE_MODEL") != "1":
+        print(
+            "M9 [model] 未启用模型：请加 --use-model 或设置 USE_MODEL=1；"
+            "否则 route_model 会全部回退 default，准确率没有意义。"
+        )
+        return 1
 
     output_dir = args.output_dir
     output_dir.mkdir(parents=True, exist_ok=True)

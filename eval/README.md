@@ -240,15 +240,26 @@ uv run python -m eval.token_ledger --trace /tmp/m8-traces.jsonl
 
 没有 trace 或没有 `gen_ai.usage.*` span 时输出 N/A，不报错。
 
-## 技能路由（Phase A / M9）
+## 技能路由与技能评测（M9）
 
-`skill_routing.py` 是 Phase D 的占位：样本在 `eval/probes/skill_routing.jsonl`，默认全部 `enabled=false`。实现 `backend.app.skills.router.route(message)` 后逐条启用。
+`skill_routing.py` 测技能路由准确率，样本在 `eval/probes/skill_routing.jsonl`：
 
 ```sh
-uv run python -m eval.skill_routing
+uv run python -m eval.skill_routing                       # hybrid
+uv run python -m eval.skill_routing --mode rule
+uv run python -m eval.skill_routing --mode model --use-model --min-accuracy 0.9
 ```
 
-当前输出 N/A，并说明原因；启用后报告准确率与逐条路由结果。
+`model` 模式必须显式加 `--use-model`（或设置 `USE_MODEL=1`）；否则脚本直接报错，避免全部回退 default 后算出误导性的 0 分。
+
+`skill_eval.py` 按 `skills/<name>/eval.jsonl` 跑完整图，检查技能、动作、问题与结果模板：
+
+```sh
+uv run python -m eval.skill_eval
+uv run python -m eval.skill_eval --use-model --min-accuracy 0.9
+```
+
+技能评测会显式关闭语义分诊和 critic，只测技能路由与流程，不受本机 `.env` 影响。
 
 ## general / medical 路由评测（M11）
 

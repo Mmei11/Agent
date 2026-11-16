@@ -689,3 +689,11 @@
 - 后端 `user_sessions` 增加 `pinned` 列，新增 `PATCH /me/sessions/{id}`；历史按置顶优先、最近活跃排序
 - 首页去掉“模拟问诊工作台”和页脚构建字样；`index.html` 补 description、Open Graph、JSON-LD
 - 单测 **702 passed**
+
+**2026-11-16 · nightly 门禁修复**
+
+- `eval.skill_routing --mode model` 没有设置 `USE_MODEL=1`，`route_model` 全部回退 default，导致 M9 连续三晚 0.0；新增 `--use-model`，并在 model 模式未启用模型时直接报错，避免继续静默算 0 分
+- `eval.skill_eval` 的 `--use-model` 只在 `sys.argv` 里判断，argparse 没声明，nightly 下一步会直接参数错误；已补声明，并显式关闭语义分诊/critic，保证评测与 CI 环境一致
+- 模型抽取偶尔漏掉“无病史”，导致已知背景一直缺失；新增确定性补回，覆盖“无病史/无既往史/无慢性病/无过敏史”
+- `_health_topic_query` 的正则写成裸 `?`，RT001 触发 `nothing to repeat` 500；已转义并补测试
+- 本地 nightly 等价结果：M9 model **1.0**、技能评测 **1.0**、红队 **12/12**、judge `pass^5` **5/5**；单测 **704 passed**

@@ -494,6 +494,12 @@ def test_answer_health_topic_maps_chinese(monkeypatch):
     assert "不构成诊断或治疗建议" in text
 
 
+def test_health_topic_query_handles_plain_question_mark():
+    """没有中文病名别名时也要能处理问号，不能触发正则编译错误。"""
+    assert _health_topic_query("这是什么病？") == "这"
+    assert _health_topic_query("这是什么病?") == "这"
+
+
 def test_trial_record_by_nct(monkeypatch):
     monkeypatch.setattr(opening, "DEFAULT_CATALOG", _registered())
 

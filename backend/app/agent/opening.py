@@ -697,7 +697,7 @@ def _health_topic_query(message: str) -> str:
         if chinese in message:
             return english
     text = re.sub(
-        r"(什么是|是什么病|是什么|有什么症状|有哪些症状|怎么预防|如何预防|科普|的|？|?)",
+        r"(什么是|是什么病|是什么|有什么症状|有哪些症状|怎么预防|如何预防|科普|的|？|\?)",
         " ",
         message,
     )

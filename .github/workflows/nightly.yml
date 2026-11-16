@@ -85,7 +85,7 @@ jobs:
         run: uv run python -m eval.run_eval --use-model --split dev
 
       - name: Model-mode skill routing (gate 0.9)
-        run: uv run python -m eval.skill_routing --mode model --min-accuracy 0.9
+        run: uv run python -m eval.skill_routing --mode model --use-model --min-accuracy 0.9
 
       - name: Model-mode skill eval (gate 0.9)
         run: uv run python -m eval.skill_eval --use-model --min-accuracy 0.9

@@ -188,6 +188,30 @@ def test_auto_uses_llm_when_enabled(monkeypatch):
     assert meta["usage"]["input_tokens"] == 10
 
 
+def test_auto_fills_negative_background_when_model_misses_it(monkeypatch):
+    """模型漏掉“无病史”时，用原文补回已知背景。"""
+    monkeypatch.setenv("USE_MODEL", "1")
+    import backend.app.agent.intake_llm as intake_llm
+
+    usage = SimpleNamespace(
+        model="qwen-plus",
+        input_tokens=10,
+        output_tokens=5,
+        latency_ms=120,
+        cost_estimate=None,
+    )
+    monkeypatch.setattr(
+        intake_llm,
+        "extract_facts_with_meta",
+        lambda text, **kwargs: ({"主要症状": ["头部不适"]}, {}, usage),
+    )
+
+    facts, evidence = extract_facts_auto("头部不适两天，无病史")
+
+    assert facts["已知背景"] == ["无病史"]
+    assert evidence["已知背景"] == ["无病史"]
+
+
 def test_auto_falls_back_on_llm_error(monkeypatch):
     """模型层报错时回退关键词，并把原因留在 meta。"""
     monkeypatch.setenv("USE_MODEL", "1")
