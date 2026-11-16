@@ -24,6 +24,8 @@ from typing import Callable, Literal
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 from mcp.client.streamable_http import streamable_http_client
+from mcp.shared.exceptions import MCPError
+from mcp.types import REQUEST_TIMEOUT
 from pydantic import BaseModel, create_model
 
 from backend.app.config import load_env_file
@@ -31,6 +33,7 @@ from backend.app.tools.catalog import DEFAULT_CATALOG, ToolCatalog
 from backend.app.tools.breaker import CircuitBreaker
 from backend.app.tools.contract import ToolSpec
 from backend.app.tools.external_summaries import SUMMARIZERS
+from backend.app.tools.runtime import breaker_from_env
 
 logger = logging.getLogger(__name__)
 
@@ -186,7 +189,7 @@ class MCPSession:
     def __init__(self, config: MCPServerConfig, breaker: CircuitBreaker | None = None):
         self.config = config
         self.tools: list = []
-        self._breaker = breaker or CircuitBreaker()
+        self._breaker = breaker or breaker_from_env()
         self._loop: asyncio.AbstractEventLoop | None = None
         self._thread: threading.Thread | None = None
         self._stack: AsyncExitStack | None = None
@@ -265,6 +268,12 @@ class MCPSession:
             ) from exc
         except Exception as exc:
             self._breaker.record_failure()
+            # SDK 的请求超时是 MCPError(REQUEST_TIMEOUT)，统一映射成 timeout，
+            # 这样外层重试与熔断看到的是同一种瞬时失败。
+            if isinstance(exc, MCPError) and exc.code == REQUEST_TIMEOUT:
+                raise TimeoutError(
+                    f"MCP {self.config.name}.{name} 超过 {self.config.timeout_s}s"
+                ) from exc
             raise MCPClientError(f"MCP {self.config.name}.{name} 调用失败：{exc}") from exc
 
         self._breaker.record_success()

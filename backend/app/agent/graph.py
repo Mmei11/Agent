@@ -35,15 +35,7 @@ from backend.app.safety.rule_engine import final_check  # 最终输出检查
 from backend.app.skills.context import skill_for
 from backend.app.tools.catalog import DEFAULT_CATALOG
 from backend.app.tools.knowledge_tools import DEPARTMENT_ROUTE
-from backend.app.tools.registry import call_tool as _live_call_tool
-from backend.app.tools.registry import stub_call_tool
-
-# CI 与门禁自检没有向量库，用确定性替身跑通流程；本地与生产默认走真实检索。
-call_tool = (
-    stub_call_tool
-    if os.getenv("KNOWLEDGE_BACKEND", "pgvector") == "stub"
-    else _live_call_tool
-)
+from backend.app.tools.registry import call_tool
 
 MAX_FOLLOWUPS = 3  # 普通追问上限，spec 要求的工程边界
 

@@ -649,3 +649,15 @@
 - 新增 `TOOL_MAX_ATTEMPTS / TOOL_RETRY_BACKOFF_MS / TOOL_BREAKER_THRESHOLD / TOOL_BREAKER_COOLDOWN_S`，默认 2 次 / 100ms / 3 次 / 30s
 - 新增 5 条测试：瞬时失败重试成功、参数错误不重试、非幂等不重试、熔断打开后不再调用、退避间隔
 - 单测 **675 passed**
+
+**2026-11-16 · Phase F 第 5 课：真实模型模式的工具可靠性回归**
+
+- 新增 `eval/fault_mcp_server.py`：可切换故障的 PubMed MCP server，故障时真实睡 30s，客户端 1s 超时；用计数文件证明请求是否真的打了两次
+- 新增 `eval/reliability_e2e.py`：FastAPI + 真实 qwen 跑“健康 → 超时重试 → 熔断 → 恢复”；不进 CI，发版前手动跑
+- 真实模型结果：健康 6.52s / server +1；首次故障 4.96s / server +2（重试）；第二次 3.87s / +1；熔断 2.87s / +0；恢复 6.27s / +1
+- 回归暴露并修复 3 个问题：
+  - `KNOWLEDGE_BACKEND=stub` 通过 opening/graph 的模块级别名把所有工具都换成知识库替身，外部 PubMed 被吞掉；改为统一走 `registry.call_tool`，只替身知识工具
+  - MCP SDK 的 `MCPError(REQUEST_TIMEOUT)` 被归为 `unavailable`；现在映射为 `timeout`，内外层看到同一种瞬时失败
+  - PubMed 工具失败时文案写成“没有检索到文献”；现在明确写“外部文献检索暂时不可用（暂无依据）”
+- 新增 3 条测试：超时不谎称空结果、stub 不劫持外部调用、SDK 超时映射
+- 单测 **678 passed**

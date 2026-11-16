@@ -39,14 +39,19 @@ def reset_tool_breakers() -> None:
         _BREAKERS.clear()
 
 
+def breaker_from_env() -> CircuitBreaker:
+    """按同一组环境变量创建熔断器，工具层与会话层共用。"""
+    return CircuitBreaker(
+        threshold=_env_int("TOOL_BREAKER_THRESHOLD", 3),
+        cooldown_s=_env_float("TOOL_BREAKER_COOLDOWN_S", 30.0),
+    )
+
+
 def _breaker(name: str) -> CircuitBreaker:
     with _BREAKER_LOCK:
         breaker = _BREAKERS.get(name)
         if breaker is None:
-            breaker = CircuitBreaker(
-                threshold=_env_int("TOOL_BREAKER_THRESHOLD", 3),
-                cooldown_s=_env_float("TOOL_BREAKER_COOLDOWN_S", 30.0),
-            )
+            breaker = breaker_from_env()
             _BREAKERS[name] = breaker
         return breaker
 

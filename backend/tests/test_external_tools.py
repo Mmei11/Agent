@@ -276,6 +276,32 @@ def test_answer_research_formats_citations(monkeypatch):
     assert result["trace"][0]["pubmed"] is True
 
 
+def test_answer_research_failure_is_not_reported_as_empty(monkeypatch):
+    monkeypatch.setattr(opening, "DEFAULT_CATALOG", _registered())
+    monkeypatch.setattr(
+        opening,
+        "call_tool",
+        lambda name, params: ToolResult(
+            ok=False, name=name, error="超时", error_kind="timeout"
+        ),
+    )
+
+    result = answer_research(_state("PubMed 上关于肺炎的研究"))
+
+    text = result["rendered_text"]
+    assert "不可用" in text
+    assert "暂时没有检索到" not in text
+
+
+def test_knowledge_stub_does_not_replace_external_calls(monkeypatch):
+    """KNOWLEDGE_BACKEND=stub 只能替身知识工具，不能吞掉外部工具调用。"""
+    from backend.app.tools import registry
+
+    monkeypatch.setenv("KNOWLEDGE_BACKEND", "stub")
+
+    assert opening.call_tool is registry.call_tool
+
+
 def test_external_paths_disabled_return_none(monkeypatch):
     monkeypatch.setattr(opening, "DEFAULT_CATALOG", SimpleNamespace(get=lambda name: None))
 

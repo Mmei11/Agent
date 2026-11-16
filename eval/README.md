@@ -280,3 +280,24 @@ uv run python -m eval.long_session --use-model --split holdout
 - `summary=✓` 且 `details=✗` 才说明回答必须依赖滚动摘要。
 
 24 轮大约 50–70 次模型调用，耗时几分钟；适合阶段末或 nightly，不适合每次 PR。
+
+## 工具可靠性回归（真实模型 + 真实超时）
+
+`reliability_e2e.py` 用 FastAPI + 真实模型跑一条 PubMed 问句，并通过
+`fault_mcp_server.py` 制造真实超时，验证重试、熔断与恢复：
+
+```sh
+PYTHONPATH=. uv run python -m eval.reliability_e2e
+PYTHONPATH=. uv run python -m eval.reliability_e2e --mock   # 只调试链路，不产生模型费用
+```
+
+断言覆盖：
+
+- 健康调用只打一次 server；
+- 超时后幂等工具重试一次（server 计数 +2）；
+- 再失败后熔断器打开；
+- 熔断期间 server 计数不变、回答不说“没有文献”；
+- 冷却期后工具恢复，回答重新带上 PMID。
+
+脚本会在临时目录生成轨迹与服务端日志。真实模型模式会产生费用，不进 CI；
+发版前或改动工具运行时后手动跑一次。

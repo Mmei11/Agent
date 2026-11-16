@@ -14,6 +14,8 @@ from types import SimpleNamespace
 
 import pytest
 from mcp import types
+from mcp.shared.exceptions import MCPError
+from mcp.types import REQUEST_TIMEOUT
 
 from backend.app.tools.catalog import ToolCatalog
 from backend.app.tools.knowledge_tools import KNOWLEDGE_TOOL_SPECS
@@ -196,6 +198,21 @@ def test_circuit_breaker_opens_and_recovers():
     assert breaker.allow()
 
 
+def test_sdk_request_timeout_maps_to_timeout(monkeypatch):
+    session = MCPSession(
+        MCPServerConfig(name="demo", transport="http", url="http://127.0.0.1:1/mcp")
+    )
+    session._session = SimpleNamespace(call_tool=lambda *args, **kwargs: None)
+
+    def _raise_timeout(coro, timeout):
+        raise MCPError(code=REQUEST_TIMEOUT, message="Request 'tools/call' timed out")
+
+    monkeypatch.setattr(session, "_submit", _raise_timeout)
+
+    with pytest.raises(TimeoutError):
+        session.call("demo_tool", {})
+
+
 class _FakeSession:
     def __init__(self, tools):
         self.tools = tools
@@ -239,6 +256,8 @@ def test_empty_whitelist_registers_nothing():
 
 def test_external_tools_are_off_by_default(monkeypatch):
     shutdown_external_tools()
+    # 本机 .env 可能开着 MCP；这个用例只验证“显式没有开关时默认关闭”。
+    monkeypatch.setattr("backend.app.tools.mcp_client.load_env_file", lambda: None)
     monkeypatch.delenv("MCP_ENABLED", raising=False)
 
     assert load_external_tools(ToolCatalog()) == []

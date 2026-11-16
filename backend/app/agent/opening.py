@@ -47,15 +47,7 @@ from backend.app.tools.external_summaries import (
     pubmed_counts,
     safe_snippet,
 )
-from backend.app.tools.registry import call_tool as _live_call_tool
-from backend.app.tools.registry import stub_call_tool
-
-# 没有向量库时用确定性替身跑通流程；与 graph.py 的开关保持一致。
-call_tool = (
-    stub_call_tool
-    if os.getenv("KNOWLEDGE_BACKEND", "pgvector") == "stub"
-    else _live_call_tool
-)
+from backend.app.tools.registry import call_tool
 
 OPENING_INVITE = (
     "今天身体状态怎么样？如果有不舒服，可以告诉我具体哪里不舒服、持续多久，"
@@ -1109,7 +1101,13 @@ def answer_research(state: ConsultationState, *, node: str = "general_route") ->
     payload = markdown_text((outcome.data or {}) if outcome.ok else "")
     entries = _pubmed_entries(payload)
 
-    if entries:
+    if not outcome.ok:
+        # 工具失败不等于“没有文献”：必须明确说明依据暂时不可用。
+        text = (
+            "外部文献检索暂时不可用（暂无依据）。"
+            "可以稍后重试，或直接访问 PubMed 查询。"
+        )
+    elif entries:
         total, returned = pubmed_counts(payload)
         lines = [
             f"PubMed 检索（共 {total} 条，"
