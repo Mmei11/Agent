@@ -3540,3 +3540,68 @@ footer .build-tag,
     grid-row: 2;
     margin-left: 0
 }
+
+/* 会话记忆 Markdown 渲染 */
+.memory-markdown {
+    margin: 14px 0 0;
+    padding: 18px 20px;
+    border: 1px solid #e2ebe5;
+    border-radius: 12px;
+    background: #f7faf8;
+    color: #315f48;
+    font-size: 13px;
+    line-height: 1.8
+}
+
+.memory-markdown h2 {
+    margin: 0 0 12px;
+    color: #173b34;
+    font-size: 18px;
+    letter-spacing: -.4px
+}
+
+.memory-markdown h3 {
+    margin: 20px 0 8px;
+    padding-top: 16px;
+    border-top: 1px solid #e2ebe5;
+    color: #1f5e4e;
+    font-size: 14px
+}
+
+.memory-markdown h4 {
+    margin: 14px 0 6px;
+    color: #315f48;
+    font-size: 13px
+}
+
+.memory-markdown p {
+    margin: 8px 0
+}
+
+.memory-markdown ul {
+    margin: 6px 0;
+    padding-left: 20px
+}
+
+.memory-markdown li {
+    margin: 4px 0
+}
+
+.memory-markdown code {
+    padding: 1px 5px;
+    border-radius: 4px;
+    background: #eaf3ed;
+    color: #1f5e4e;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 12px
+}
+
+.memory-markdown strong {
+    color: #1f5e4e
+}
+
+.memory-markdown hr {
+    margin: 18px 0;
+    border: 0;
+    border-top: 1px solid #e2ebe5
+}

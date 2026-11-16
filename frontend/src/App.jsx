@@ -75,6 +75,86 @@ function AgentText({ text, animate, onReveal }) {
   );
 }
 
+// 会话记忆导出的是轻量 Markdown；只渲染标题、列表、代码、分隔线和段落。
+function renderMemoryInline(text) {
+  return String(text)
+    .split(/(`[^`]+`|\*\*[^*]+\*\*)/g)
+    .map((part, index) => {
+      if (part.startsWith("`") && part.endsWith("`")) {
+        return <code key={index}>{part.slice(1, -1)}</code>;
+      }
+      if (part.startsWith("**") && part.endsWith("**")) {
+        return <strong key={index}>{part.slice(2, -2)}</strong>;
+      }
+      return part;
+    });
+}
+
+function MemoryMarkdown({ text }) {
+  const blocks = [];
+  let list = [];
+  let paragraph = [];
+
+  const flushList = () => {
+    if (!list.length) return;
+    blocks.push(
+      <ul key={"ul-" + blocks.length}>
+        {list.map((item, index) => (
+          <li key={index}>{renderMemoryInline(item)}</li>
+        ))}
+      </ul>,
+    );
+    list = [];
+  };
+  const flushParagraph = () => {
+    if (!paragraph.length) return;
+    blocks.push(
+      <p key={"p-" + blocks.length}>{renderMemoryInline(paragraph.join(" "))}</p>,
+    );
+    paragraph = [];
+  };
+  const flush = () => {
+    flushList();
+    flushParagraph();
+  };
+
+  for (const raw of String(text || "").split("\n")) {
+    const line = raw.trim();
+    if (!line) {
+      flush();
+    } else if (line.startsWith("# ")) {
+      flush();
+      const title = line.slice(2).trim();
+      // 面板顶部已经有“会话记忆”标题，跳过重复的一级标题。
+      if (title !== "会话记忆") {
+        blocks.push(<h2 key={"h2-" + blocks.length}>{renderMemoryInline(title)}</h2>);
+      }
+    } else if (line.startsWith("## ")) {
+      flush();
+      blocks.push(
+        <h3 key={"h3-" + blocks.length}>{renderMemoryInline(line.slice(3))}</h3>,
+      );
+    } else if (line.startsWith("### ")) {
+      flush();
+      blocks.push(
+        <h4 key={"h4-" + blocks.length}>{renderMemoryInline(line.slice(4))}</h4>,
+      );
+    } else if (line === "---") {
+      flush();
+      blocks.push(<hr key={"hr-" + blocks.length} />);
+    } else if (line.startsWith("- ")) {
+      flushParagraph();
+      list.push(line.slice(2));
+    } else {
+      flushList();
+      paragraph.push(line);
+    }
+  }
+  flush();
+
+  return <div className="memory-markdown">{blocks}</div>;
+}
+
 // 浏览器只缓存会话 ID 和保存时间。完整对话与问诊状态保存在后端数据库中。
 const SESSION_KEY = "consultation_demo_session";
 const SESSION_TTL = 30 * 60 * 1000;
@@ -1167,7 +1247,7 @@ export default function App() {
             {memoryLoading && <p className="muted">正在读取记忆…</p>}
             {memoryError && <p className="feedback-error">{memoryError}</p>}
             {!memoryLoading && !memoryError && memoryData && (
-              <pre className="memory-rendered">{memoryData.rendered}</pre>
+              <MemoryMarkdown text={memoryData.rendered} />
             )}
           </div>
         </div>
