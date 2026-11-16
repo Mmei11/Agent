@@ -25,8 +25,10 @@ ALLOWED_NAMES = {
     "EMBEDDING_DIMENSION",
     "EMBEDDING_BATCH_SIZE",
     "EMBEDDING_PRICE_PER_1K",
-    # 知识库向量存储（Phase 4）。留空则用 docker-compose.knowledge.yml 的默认地址。
+    # 知识库向量存储（Phase 4）。留空则用默认的本机地址。
     "KNOWLEDGE_DB_URL",
+    # 知识工具后端：pgvector = 真实检索；stub = 无向量库时的确定性替身。
+    "KNOWLEDGE_BACKEND",
     # 运行开关
     "USE_MODEL",
     "SUMMARY_ENABLED",

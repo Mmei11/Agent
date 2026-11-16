@@ -87,6 +87,8 @@ services:
       NO_PROXY: ${NO_PROXY_DOCKER:-localhost,127.0.0.1,knowledge-db,host.docker.internal}
       # 容器内按服务名解析；本机直接跑 uvicorn 时用默认的 127.0.0.1:15433。
       KNOWLEDGE_DB_URL: postgresql://postgres:postgres@knowledge-db:5432/knowledge
+      # pgvector = 真实检索；stub = 不依赖向量库的离线演示。
+      KNOWLEDGE_BACKEND: ${KNOWLEDGE_BACKEND:-pgvector}
     volumes:
       - consultations_data:/data
     extra_hosts:
