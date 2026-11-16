@@ -69,6 +69,10 @@ class ConsultationState(BaseModel):
     # 连续含糊轮数：命中 vague 时 +1，正常轮重置为 0；供策略层决定何时收束。
     vague_turns: int = 0
     risk_flags: list = []  # 每轮风险筛查覆盖上轮结果
+    # Phase E：语义风险识别的依据与结论，供 output 渲染和审计。
+    semantic_risk_verdict: str = ""
+    semantic_risk_confidence: float = 0.0
+    semantic_risk_evidence: list = []
     tool_results: dict = {}
 
     # --- Phase C：本轮工具调度 ---

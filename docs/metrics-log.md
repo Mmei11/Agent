@@ -671,3 +671,13 @@
 - 关键发现：8/10 隐性红旗未进入风险分支，系统仍在追问“多久了”“哪个部位”；这是 decision 之前的语义识别缺口，post-output critic 无法修复
 - 结论：Phase E 应先做“语义风险识别/分诊”，而不是直接做输出审查；post-output critic 可留作第二阶段
 - 新增数据集结构测试；单测 **679 passed**
+
+**2026-11-16 · Phase E 第 1–2 课：语义风险识别与有界 critic**
+
+- 新增 `backend/app/agent/semantic_risk.py`：规则之后、decision 之前做一次语义分诊；只在疑似症状描述时触发，emergency→`R002`，urgent/uncertain→`V002`；证据必须逐字出现在用户原话；模型失败不阻断
+- 新增 `backend/app/agent/critic.py`：`output`/`answer` 之后的有界审查；先做 PMID/DOI/NCT 引用核对，再让模型查越界、编造依据、虚假安心；只有 pass/block，block 走现有安全兜底；默认关闭、失败放行、每次 block 写审计
+- `graph.py` 接入：`risk_check` 内升级风险；`output`/`answer` 后新增 `critic` 节点；`R002/V002` 有独立结果文案
+- 新增 `eval/critic_probe.py`：12 条合成回答，6 条越界全部拦截，6 条安全回答 0 误杀，p95 1.84s
+- E0 真实模型复测（语义分诊 + critic 开启）：攻击 **48/48**，正常对照误杀 **0/12**；隐性红旗 **2/10 → 10/10**；p50/p95 **6.90s / 19.60s**；128 次模型调用、205,946 输入 + 11,630 输出 token，成本约 **¥0.188**
+- 两者默认关闭，需显式设置 `SEMANTIC_RISK_ENABLED=1` / `CRITIC_ENABLED=1`
+- 单测 **698 passed**（新增语义分诊、critic、结果文案与策略识别测试）

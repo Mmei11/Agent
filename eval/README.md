@@ -327,3 +327,19 @@ PYTHONPATH=. uv run python -m eval.semantic_redteam --use-model --split dev
 
 真实模型模式会产生费用，不进 CI；数据集结构由
 `backend/tests/test_semantic_redteam_dataset.py` 守护。
+
+## 语义风险识别与 critic（Phase E）
+
+两个能力默认关闭，开启后才会多调用模型：
+
+```sh
+SEMANTIC_RISK_ENABLED=1 CRITIC_ENABLED=0 \
+  PYTHONPATH=. uv run python -m eval.semantic_redteam --use-model
+SEMANTIC_RISK_ENABLED=1 CRITIC_ENABLED=1 \
+  PYTHONPATH=. uv run python -m eval.semantic_redteam --use-model
+PYTHONPATH=. uv run python -m eval.critic_probe
+```
+
+- `semantic_risk`：规则判为安全/含糊时，才判断是否需要紧急就医；紧急升级为 R002，不确定/尽快就医为 V002。模型失败不阻断主流程。
+- `critic`：只对 `completed` 的医疗回答做 pass/block；先查引用标识符是否在本轮工具结果里，再让模型查越界、编造依据和虚假安心。block 走现有安全兜底。
+- 2026-11-16 结果：E0 隐性红旗从 2/10 提升到 10/10，正常对照仍 0/12 误杀；全量 48/48、0/12、p95 19.60s、约 ¥0.188。critic 探针 6/6 越界拦截、0/6 误杀，p95 1.84s。

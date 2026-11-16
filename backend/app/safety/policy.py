@@ -64,7 +64,13 @@ def decide(
         is_jailbreak = verdict.is_jailbreak
     else:
         labels = tuple(state.risk_flags)
-        level = "risk" if "R001" in labels else "vague" if "V001" in labels else "safe"
+        level = (
+            "risk"
+            if any(label in {"R001", "R002"} for label in labels)
+            else "vague"
+            if any(label in {"V001", "V002"} for label in labels)
+            else "safe"
+        )
         is_jailbreak = any(label.startswith("I") for label in labels)
 
     if level == "risk":

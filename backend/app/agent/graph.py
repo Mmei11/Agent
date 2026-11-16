@@ -19,6 +19,7 @@ from backend.app.agent.result import (
     build_error_result,
     build_refusal_result,
     build_risk_result,
+    build_semantic_risk_result,
     build_unavailable_result,
     build_vague_result,
     render_text,
@@ -26,6 +27,8 @@ from backend.app.agent.result import (
 from backend.app.agent.state import ConsultationState  # 状态类型
 from backend.app.agent.opening import route_general  # 未出结果时的普通/医疗预路由
 from backend.app.agent.answer import answer_followup  # 结果生成后的追问回答
+from backend.app.agent.critic import critic  # 有界输出审查者
+from backend.app.agent.semantic_risk import assess as assess_semantic_risk
 from backend.app.agent.skill_route import skill_route  # 医疗路由后的技能选择
 from backend.app.observability import current_trace, span, traced_node
 from backend.app.safety.audit import AuditEvent, input_digest, write as write_audit
@@ -47,7 +50,7 @@ def _trace_id() -> str:
 
 
 def risk_check(state: ConsultationState) -> dict:
-    """读取输入层结论，按策略优先级决定是否升级，并写审计。"""
+    """规则先判，规则没结论时再做一次语义分诊，最后写审计。"""
     level = state.input_level or "safe"
     labels = list(state.input_labels)
     flags: list[str] = []
@@ -59,6 +62,19 @@ def risk_check(state: ConsultationState) -> dict:
         flags.extend(label for label in labels if label.startswith("I"))
 
     vague_turns = state.vague_turns + 1 if level == "vague" else 0
+
+    # 规则已经判定紧急/越狱时不再多花一次模型调用；含糊可以升级为紧急。
+    semantic = None
+    if not flags or flags == ["V001"]:
+        semantic = assess_semantic_risk(state.latest_user_message)
+        if semantic.risk == "emergency":
+            flags = ["R002"]
+            level = "semantic_risk"
+        elif semantic.is_uncertain_or_urgent and not flags:
+            flags = ["V002"]
+            level = "semantic_uncertain"
+            vague_turns = max(vague_turns, state.vague_turns + 1)
+
     probe = state.model_copy(update={"risk_flags": flags, "vague_turns": vague_turns})
     with span("safety.policy", kind="safety", attributes={"policy.level": level}) as record:
         policy_decision = decide_policy(None, probe, "")
@@ -81,6 +97,9 @@ def risk_check(state: ConsultationState) -> dict:
     return {
         "risk_flags": flags,
         "vague_turns": vague_turns,
+        "semantic_risk_verdict": semantic.risk if semantic and semantic.checked else "",
+        "semantic_risk_confidence": semantic.confidence if semantic else 0.0,
+        "semantic_risk_evidence": list(semantic.evidence or []) if semantic else [],
         # 摘要只留级别和规则号，完整输入结论不再复制进 checkpoint。
         "trace": [
             {
@@ -90,6 +109,12 @@ def risk_check(state: ConsultationState) -> dict:
                 "rule": flags[0] if flags else None,
                 "policy_rule": policy_decision.rule,
                 "policy_action": policy_decision.action,
+                "semantic_risk_checked": bool(semantic and semantic.checked),
+                "semantic_risk_verdict": semantic.risk if semantic else "",
+                "semantic_risk_confidence": semantic.confidence if semantic else 0.0,
+                "semantic_risk_error": semantic.error if semantic else "",
+                "semantic_risk_skip": semantic.skip_reason if semantic else "rule_risk",
+                "semantic_risk_usage": (semantic.usage if semantic else {}) or {},
                 "trace_id": _trace_id(),
             }
         ],
@@ -242,8 +267,10 @@ def output(state: ConsultationState) -> dict:
         structured = build_refusal_result()
     elif state.risk_flags:  # 命中风险或含糊
         rule = state.risk_flags[0]
-        if rule == "V001":  # 含糊 → 保守提示
+        if rule in {"V001", "V002"}:  # 含糊 → 保守提示
             structured = build_vague_result()
+        elif rule == "R002":  # 语义分诊判定为紧急
+            structured = build_semantic_risk_result(state.semantic_risk_evidence)
         else:  # 明确风险 → 固定提示
             structured = build_risk_result(rule)
     elif tool_error:
@@ -343,6 +370,7 @@ def build_graph(checkpointer=None):
     graph.add_node("tool", traced_node("tool")(tool))  # 工具：调注册表里的受限工具
     graph.add_node("output", traced_node("output")(output))  # 输出：渲染最终结果
     graph.add_node("answer", traced_node("answer")(answer_followup))  # 追问回答
+    graph.add_node("critic", critic)  # 输出审查：默认关闭，开启时才写 trace
 
     # 连边
     graph.add_edge(START, "intake")  # 起点 → 入口
@@ -357,8 +385,9 @@ def build_graph(checkpointer=None):
     graph.add_conditional_edges("decision", route_after_decision)  # 决策后分路：追问/工具/输出
     graph.add_edge("followup", END)  # 一次请求只追问一次，等待用户下一轮回答
     graph.add_edge("tool", "decision")  # 工具 → 回到决策（循环）
-    graph.add_edge("output", END)  # 输出 → 结束
-    graph.add_edge("answer", END)  # 追问回答 → 结束
+    graph.add_edge("output", "critic")  # 输出后交给有界审查者
+    graph.add_edge("answer", "critic")  # 追问回答同样审查
+    graph.add_edge("critic", END)  # 审查通过或替换兜底后结束
 
     return graph.compile(checkpointer=checkpointer)  # 编译图，传入 checkpointer 启用持久化
 

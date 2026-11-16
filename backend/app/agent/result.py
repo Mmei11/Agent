@@ -94,6 +94,24 @@ def build_risk_result(rule: str) -> dict:
     return result.model_dump()
 
 
+def build_semantic_risk_result(evidence: list[str] | None = None) -> dict:
+    """语义分诊判定为紧急情况：给出明确的急诊建议，不列诊断。"""
+    detail = "；".join(item for item in (evidence or [])[:3] if item).strip()
+    if detail:
+        message = (
+            f"你描述的情况可能需要紧急处理（{detail}），"
+            "请立即联系急救或前往最近医院。"
+        )
+    else:
+        message = "你描述的情况可能需要紧急处理，请立即联系急救或前往最近医院。"
+    result = ConsultationResult(
+        status="risk_route",
+        risk_message=message,
+        next_step="请立即联系急救或前往最近医院",
+    )
+    return result.model_dump()
+
+
 def build_vague_result() -> dict:
     """含糊路径：表述不确定，保守提示。
 
