@@ -52,6 +52,14 @@ services:
       # Phase F：数据保留期与同意强制开关。
       DATA_RETENTION_DAYS: ${DATA_RETENTION_DAYS:-90}
       PRIVACY_CONSENT_REQUIRED: ${PRIVACY_CONSENT_REQUIRED:-0}
+      # 账号邮件：默认 console；生产在 .env 配 SMTP。
+      EMAIL_BACKEND: ${EMAIL_BACKEND:-console}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM: ${SMTP_FROM:-no-reply@localhost}
+      SMTP_STARTTLS: ${SMTP_STARTTLS:-1}
       # Langfuse：容器内访问宿主机用 host.docker.internal；Docker 专用变量避免
       # 与本地 uvicorn 的 LANGFUSE_HOST=127.0.0.1 冲突。
       TRACE_SINK: ${TRACE_SINK_DOCKER:-none}

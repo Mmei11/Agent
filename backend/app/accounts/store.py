@@ -5,6 +5,8 @@
 """
 
 import os
+import hashlib
+import secrets
 import sqlite3
 import uuid
 from contextlib import contextmanager
@@ -13,6 +15,8 @@ from datetime import datetime, timedelta, timezone
 from backend.app.storage.saver import DEFAULT_DB_PATH
 
 DEFAULT_SESSION_TTL_DAYS = 7
+TOKEN_VERIFY_EMAIL = "verify_email"
+TOKEN_RESET_PASSWORD = "reset_password"
 
 # 历史列表里展示的标题长度；超出截断，避免一条长消息撑满侧栏。
 SESSION_TITLE_CHARS = 24
@@ -65,7 +69,9 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
             updated_at TEXT NOT NULL,
             last_login_at TEXT,
             consent_version TEXT NOT NULL DEFAULT '',
-            consent_at TEXT
+            consent_at TEXT,
+            email_verified INTEGER NOT NULL DEFAULT 0,
+            email_verified_at TEXT
         );
 
         CREATE TABLE IF NOT EXISTS auth_sessions (
@@ -95,6 +101,19 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
 
         CREATE INDEX IF NOT EXISTS idx_user_sessions_owner
             ON user_sessions(user_id, last_active_at DESC);
+
+        CREATE TABLE IF NOT EXISTS account_tokens (
+            id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            purpose TEXT NOT NULL,
+            token_hash TEXT NOT NULL UNIQUE,
+            created_at TEXT NOT NULL,
+            expires_at TEXT NOT NULL,
+            used_at TEXT
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_account_tokens_user
+            ON account_tokens(user_id, purpose);
         """
     )
     # 旧库补列：CREATE TABLE IF NOT EXISTS 不会修改已存在的表。
@@ -105,6 +124,12 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
         )
     if "consent_at" not in columns:
         conn.execute("ALTER TABLE users ADD COLUMN consent_at TEXT")
+    if "email_verified" not in columns:
+        conn.execute(
+            "ALTER TABLE users ADD COLUMN email_verified INTEGER NOT NULL DEFAULT 0"
+        )
+    if "email_verified_at" not in columns:
+        conn.execute("ALTER TABLE users ADD COLUMN email_verified_at TEXT")
 
 
 def _user_row(row: sqlite3.Row | None) -> dict | None:
@@ -156,6 +181,92 @@ def record_consent(user_id: str, version: str) -> dict | None:
             (version, now, now, user_id),
         )
     return get_user_by_id(user_id)
+
+
+def _token_digest(token: str) -> str:
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def create_account_token(user_id: str, purpose: str, ttl_minutes: int = 60) -> str:
+    """生成一次性令牌并只返回明文；库里只存摘要。"""
+    raw = secrets.token_urlsafe(32)
+    now = _now()
+    with _connection() as conn:
+        # 同一用途只保留最新一个有效令牌，旧链接立即失效。
+        conn.execute(
+            "UPDATE account_tokens SET used_at = ? "
+            "WHERE user_id = ? AND purpose = ? AND used_at IS NULL",
+            (_iso(now), user_id, purpose),
+        )
+        conn.execute(
+            """
+            INSERT INTO account_tokens
+                (id, user_id, purpose, token_hash, created_at, expires_at, used_at)
+            VALUES (?, ?, ?, ?, ?, ?, NULL)
+            """,
+            (
+                str(uuid.uuid4()),
+                user_id,
+                purpose,
+                _token_digest(raw),
+                _iso(now),
+                _iso(now + timedelta(minutes=ttl_minutes)),
+            ),
+        )
+    return raw
+
+
+def consume_account_token(token: str, purpose: str) -> str | None:
+    """校验并通过后标记已使用；返回 user_id，失败返回 None。"""
+    now = _now()
+    with _connection() as conn:
+        row = conn.execute(
+            "SELECT id, user_id, expires_at, used_at FROM account_tokens "
+            "WHERE token_hash = ? AND purpose = ?",
+            (_token_digest(token), purpose),
+        ).fetchone()
+        if row is None or row["used_at"]:
+            return None
+        try:
+            expires_at = datetime.fromisoformat(row["expires_at"])
+        except ValueError:
+            return None
+        if expires_at <= now:
+            return None
+        conn.execute(
+            "UPDATE account_tokens SET used_at = ? WHERE id = ?",
+            (_iso(now), row["id"]),
+        )
+        return row["user_id"]
+
+
+def mark_email_verified(user_id: str) -> None:
+    now = _iso(_now())
+    with _connection() as conn:
+        conn.execute(
+            "UPDATE users SET email_verified = 1, email_verified_at = ?, "
+            "updated_at = ? WHERE id = ?",
+            (now, now, user_id),
+        )
+
+
+def update_password(user_id: str, password_hash: str) -> None:
+    now = _iso(_now())
+    with _connection() as conn:
+        conn.execute(
+            "UPDATE users SET password_hash = ?, updated_at = ? WHERE id = ?",
+            (password_hash, now, user_id),
+        )
+
+
+def revoke_all_auth_sessions(user_id: str) -> None:
+    now = _iso(_now())
+    with _connection() as conn:
+        conn.execute(
+            "UPDATE auth_sessions SET revoked_at = ? "
+            "WHERE user_id = ? AND revoked_at IS NULL",
+            (now, user_id),
+        )
 
 
 def delete_user(user_id: str) -> list[str]:

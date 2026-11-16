@@ -623,6 +623,15 @@
 - 前端：注册页增加隐私说明勾选与弹层；登录后无同意记录会先进入同意闸门；顶栏「隐私」可查看说明、导出数据、删除账号
 - 单测 **666 passed**（新增 7 条隐私测试）
 
+**2026-11-16 · Phase F 第 3 课：邮箱验证与找回密码**
+
+- `users` 增加 `email_verified / email_verified_at`；新增 `account_tokens` 表，令牌只存 SHA-256 摘要、一次性、带过期时间
+- 注册后发送验证邮件；新增 `POST /auth/verify-email` 与 `POST /auth/resend-verification`
+- 新增 `POST /auth/forgot-password`（不暴露邮箱是否存在）与 `POST /auth/reset-password`；重置成功后吊销所有登录态
+- 邮件后端默认 `console`（写后端日志，便于本地演示），配置 `SMTP_*` 后走真实 SMTP
+- 前端：登录页「忘记密码？」、邮箱未验证提示、验证码输入与重置密码表单
+- 单测 **670 passed**（新增 4 条邮箱验证/重置测试）
+
 **2026-11-16 · Phase F 第 1 课：来源核验台账**
 
 - 删除 `src-project-derived`，换成 5 个公开来源：急诊预检分诊专家共识（2018）、就诊挂号指南（政府网站转载）、北京协和医院就医须知、国家药监局 OTC 说明书范本入口、WHO 儿童医院照护手册

@@ -1828,3 +1828,28 @@ footer .build-tag,
     color: #4c635c;
     font-size: 14px
 }
+
+.auth-forgot {
+    display: block;
+    margin: -4px 0 12px auto;
+    font-size: 12px;
+    color: #1e7a5f
+}
+
+.auth-notice-inline {
+    margin: 0 0 12px;
+    font-size: 12px;
+    color: #1e7a5f
+}
+
+.verify-banner {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    padding: 7px 16px;
+    background: #fff6e8;
+    border-bottom: 1px solid #f0dfc4;
+    color: #8a5a1f;
+    font-size: 12px
+}

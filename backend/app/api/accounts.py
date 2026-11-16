@@ -15,6 +15,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel
 
+from backend.app.accounts import email as account_email
 from backend.app.accounts import security, store
 from backend.app.api.ratelimit import RateLimiter
 from backend.app.config import load_env_file
@@ -54,6 +55,19 @@ class ConsentRequest(BaseModel):
     version: str = PRIVACY_VERSION
 
 
+class VerifyEmailRequest(BaseModel):
+    token: str = ""
+
+
+class ForgotPasswordRequest(BaseModel):
+    email: str = ""
+
+
+class ResetPasswordRequest(BaseModel):
+    token: str = ""
+    new_password: str = ""
+
+
 class UserOut(BaseModel):
     """对外只暴露公开字段；password_hash 永远不出账号模块。"""
 
@@ -66,6 +80,7 @@ class UserOut(BaseModel):
     consent_version: str = ""
     consent_at: str | None = None
     consent_required: bool = False
+    email_verified: bool = False
 
 
 class AuthResponse(BaseModel):
@@ -85,6 +100,7 @@ def _public_user(user: dict) -> UserOut:
         consent_version=consent_version,
         consent_at=user.get("consent_at"),
         consent_required=consent_version != PRIVACY_VERSION,
+        email_verified=bool(user.get("email_verified")),
     )
 
 
@@ -238,6 +254,12 @@ def register(req: RegisterRequest, request: Request, response: Response):
     store.mark_login(user["id"])
     session = _open_session(user, request, response)
     user = store.get_user_by_id(user["id"])
+
+    verification = store.create_account_token(
+        user["id"], store.TOKEN_VERIFY_EMAIL, ttl_minutes=24 * 60
+    )
+    account_email.send_verification_email(user["email"], verification)
+
     return AuthResponse(user=_public_user(user), expires_at=session["expires_at"])
 
 
@@ -309,3 +331,61 @@ def privacy():
         "export_endpoint": "/auth/export",
         "delete_endpoint": "/auth/delete",
     }
+
+
+@router.post("/verify-email")
+def verify_email(req: VerifyEmailRequest):
+    """用邮件里的一次性验证码完成邮箱验证。"""
+    user_id = store.consume_account_token(req.token, store.TOKEN_VERIFY_EMAIL)
+    if user_id is None:
+        raise HTTPException(status_code=400, detail="验证码无效或已过期")
+    store.mark_email_verified(user_id)
+    return {"ok": True}
+
+
+@router.post("/resend-verification")
+def resend_verification(user: dict = Depends(current_user)):
+    """给当前账号重发验证码；已验证的账号直接返回。"""
+    if user.get("email_verified"):
+        return {"ok": True, "already": True}
+
+    token = store.create_account_token(
+        user["id"], store.TOKEN_VERIFY_EMAIL, ttl_minutes=24 * 60
+    )
+    sent = account_email.send_verification_email(user["email"], token)
+    return {"ok": True, "sent": sent}
+
+
+@router.post("/forgot-password")
+def forgot_password(req: ForgotPasswordRequest, request: Request):
+    """发送找回密码验证码；无论账号是否存在都返回 ok，避免枚举邮箱。"""
+    email = security.normalize_email(req.email)
+    _throttle("forgot", request, email)
+
+    user = store.get_user_by_email(email)
+    if user is not None and user["status"] == "active":
+        token = store.create_account_token(
+            user["id"], store.TOKEN_RESET_PASSWORD, ttl_minutes=30
+        )
+        account_email.send_password_reset_email(user["email"], token)
+    return {"ok": True}
+
+
+@router.post("/reset-password")
+def reset_password(req: ResetPasswordRequest):
+    """用一次性验证码重置密码；成功后吊销所有登录态。"""
+    problem = security.password_problem(req.new_password)
+    if problem:
+        raise HTTPException(status_code=400, detail=problem)
+
+    user_id = store.consume_account_token(
+        req.token, store.TOKEN_RESET_PASSWORD
+    )
+    if user_id is None:
+        raise HTTPException(status_code=400, detail="验证码无效或已过期")
+
+    store.update_password(user_id, security.hash_password(req.new_password))
+    store.revoke_all_auth_sessions(user_id)
+    # 能收到重置邮件，说明邮箱归属已确认。
+    store.mark_email_verified(user_id)
+    return {"ok": True}

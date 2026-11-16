@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import { ForgotPasswordPanel } from "./AccountSecurity.jsx";
 import PrivacyPanel, { PRIVACY_VERSION } from "./Privacy.jsx";
 
 // 与后端保持一致的轻量校验；后端仍会再校验一次，前端只负责即时提示。
@@ -81,6 +82,8 @@ export default function AuthScreen({ onAuthed }) {
   const [showPassword, setShowPassword] = useState(false);
   const [consent, setConsent] = useState(false);
   const [privacyOpen, setPrivacyOpen] = useState(false);
+  const [forgotOpen, setForgotOpen] = useState(false);
+  const [resetNotice, setResetNotice] = useState("");
   const [error, setError] = useState("");
   const [pending, setPending] = useState(false);
   const emailRef = useRef(null);
@@ -314,6 +317,20 @@ export default function AuthScreen({ onAuthed }) {
               </label>
             )}
 
+            {!isRegister && (
+              <button
+                type="button"
+                className="auth-link auth-forgot"
+                onClick={() => setForgotOpen(true)}
+              >
+                忘记密码？
+              </button>
+            )}
+
+            {resetNotice && (
+              <p className="auth-notice-inline">{resetNotice}</p>
+            )}
+
             {error && (
               <div className="auth-error" role="alert">
                 {error}
@@ -354,6 +371,17 @@ export default function AuthScreen({ onAuthed }) {
         open={privacyOpen}
         user={null}
         onClose={() => setPrivacyOpen(false)}
+      />
+      <ForgotPasswordPanel
+        open={forgotOpen}
+        onClose={() => setForgotOpen(false)}
+        onReset={() => {
+          setMode("login");
+          setPassword("");
+          setConfirm("");
+          setError("");
+          setResetNotice("密码已重置，请用新密码登录。");
+        }}
       />
     </div>
   );

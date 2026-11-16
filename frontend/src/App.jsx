@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import AuthScreen, { claimSession, fetchCurrentUser, logoutUser } from "./Auth.jsx";
+import { EmailVerifyPanel } from "./AccountSecurity.jsx";
 import HistoryDrawer from "./HistoryDrawer.jsx";
 import PrivacyPanel from "./Privacy.jsx";
 
@@ -214,6 +215,7 @@ export default function App() {
   const [prefillMessage, setPrefillMessage] = useState("");
   const [historyOpen, setHistoryOpen] = useState(false);
   const [privacyOpen, setPrivacyOpen] = useState(false);
+  const [verifyOpen, setVerifyOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [restoring, setRestoring] = useState(Boolean(sessionId));
   const [error, setError] = useState("");
@@ -634,6 +636,14 @@ export default function App() {
           </button>
         </div>
       </header>
+      {user.email_verified === false && (
+        <div className="verify-banner">
+          <span>邮箱未验证。验证后可用于找回密码。</span>
+          <button className="text-button" onClick={() => setVerifyOpen(true)}>
+            去验证
+          </button>
+        </div>
+      )}
       <main className="page-content">
         <section className="intro" aria-labelledby="page-title">
           <div className="eyebrow">
@@ -1017,6 +1027,12 @@ export default function App() {
           setMessages([]);
           setUser(null);
         }}
+      />
+      <EmailVerifyPanel
+        open={verifyOpen}
+        user={user}
+        onClose={() => setVerifyOpen(false)}
+        onVerified={setUser}
       />
     </div>
   );

@@ -64,6 +64,14 @@ ALLOWED_NAMES = {
     # Phase F：隐私与数据保留
     "DATA_RETENTION_DAYS",
     "PRIVACY_CONSENT_REQUIRED",
+    # Phase F：账号邮件（console / smtp）
+    "EMAIL_BACKEND",
+    "SMTP_HOST",
+    "SMTP_PORT",
+    "SMTP_USER",
+    "SMTP_PASSWORD",
+    "SMTP_FROM",
+    "SMTP_STARTTLS",
     # 本地轨迹
     "TRACE_SINK",
     "TRACE_PATH",
