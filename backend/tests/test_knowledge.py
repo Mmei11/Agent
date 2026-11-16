@@ -58,10 +58,16 @@ def test_every_entry_carries_scope_and_version():
         assert entry.version == "v1"
 
 
-def test_unverified_sources_are_discoverable():
-    """D1 的出处尚未核实，必须能从数据里查出来，而不是藏在注释里。"""
-    unverified = [source.id for source in load_sources().values() if not source.verified]
-    assert unverified == ["src-project-derived"]
+def test_sources_are_public_and_have_evidence():
+    """Phase F：不再保留项目自造来源，每个 verified 来源必须有 URL 与核对人。"""
+    sources = load_sources()
+
+    assert "src-project-derived" not in sources
+    for source in sources.values():
+        assert source.verified
+        assert source.url
+        assert source.retrieved_at
+        assert source.verified_by
 
 
 def test_entry_referencing_missing_source_is_rejected():

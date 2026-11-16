@@ -614,3 +614,13 @@
 - 回退验证：坏 manifest 跳过、default 兜底、`SKILLS_ENABLED=0` 图内回 default、prompt 缺失明确失败
 - 结果：M9 20 条 rule/hybrid/model 均 **1.000**；技能评测 **8/8 = 1.000**；主案例 dev **26/26**
 - 单测 **659 passed**
+
+**2026-11-16 · Phase F 第 1 课：来源核验台账**
+
+- 删除 `src-project-derived`，换成 5 个公开来源：急诊预检分诊专家共识（2018）、就诊挂号指南（政府网站转载）、北京协和医院就医须知、国家药监局 OTC 说明书范本入口、WHO 儿童医院照护手册
+- `Source` 增加 `url / retrieved_at / verified_by / review_status`；`verified=true` 必须同时有 URL、抓取日期和核对人
+- 知识条目从 22 条扩到 **112 条**：科室方向 79、红旗 20、就医准备 13；红旗 → 急诊分诊共识/WHO，科室方向 → 公开挂号指南，就医准备 → 协和就医须知；全部标为 `source_mapped`
+- 19 条 OTC 说明书增加 NMPA 来源 URL 与 `review_status=pharmacist_pending`，仍保持 `verified=false`
+- 新增 `eval/source_check.py`：结构检查（来源存在、verified 有证据、无自造来源）；CI 接入非严格门禁，`--strict` 作为发布门禁
+- 当前仍待人工：112 条知识临床审核、19 条说明书药师审核；完成后才能把 `review_status` 升为 `clinically_reviewed / pharmacist_approved`
+- 单测 **659 passed**

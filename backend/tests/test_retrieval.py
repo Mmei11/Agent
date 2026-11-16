@@ -248,7 +248,12 @@ def test_category_filter_narrows_results(indexed):
         category="red_flag",
         top_k=5,
     )
-    assert hits == []
+
+    # 知识库扩充后，头痛可以命中“发热伴颈项强直与剧烈头痛”这条红旗；
+    # 过滤仍然只返回 red_flag 类别。
+    assert hits
+    assert all(hit.id.startswith("rf-") for hit in hits)
+    assert any(hit.id == "rf-meningitis" for hit in hits)
 
 
 def test_empty_question_returns_nothing(indexed):

@@ -1,10 +1,62 @@
 [
   {
-    "id": "src-project-derived",
-    "title": "科室分诊通用原则",
-    "issuer": "本项目",
+    "id": "src-er-triage-2018",
+    "title": "急诊预检分诊专家共识",
+    "issuer": "急诊预检分诊专家共识组（中华急诊医学杂志）",
+    "year": 2018,
+    "note": "四级分诊标准；红旗条目映射到急诊评估原则，具体临床审核待完成。",
+    "verified": true,
+    "review_status": "source_mapped",
+    "url": "http://www.cem.org.cn/rhtml/20180606/index.htm",
+    "retrieved_at": "2026-11-16",
+    "verified_by": "项目组·公开文件核对"
+  },
+  {
+    "id": "src-hospital-triage-2025",
+    "title": "就诊挂号指南",
+    "issuer": "乐安县人民医院分院（乐安县政府网站）",
+    "year": 2025,
+    "note": "症状—科室对照；部分条目为通用分诊，具体以医院分诊为准。",
+    "verified": true,
+    "review_status": "source_mapped",
+    "url": "https://www.jxlean.gov.cn/art/2025/9/29/art_553_4361294.html",
+    "retrieved_at": "2026-11-16",
+    "verified_by": "项目组·公开文件核对"
+  },
+  {
+    "id": "src-pumch-notice-2026",
+    "title": "北京协和医院就医须知",
+    "issuer": "北京协和医院",
     "year": 2026,
-    "note": "条目为项目归纳，非原文引用；公开演示前需替换为可核实的公开文件",
-    "verified": false
+    "note": "实名就诊与证件要求；病历、用药清单与过敏史属于通用就诊准备建议。",
+    "verified": true,
+    "review_status": "source_mapped",
+    "url": "https://www.pumch.cn/medical_notice.html",
+    "retrieved_at": "2026-11-16",
+    "verified_by": "项目组·公开文件核对"
+  },
+  {
+    "id": "src-nmpa-otc-2023",
+    "title": "非处方药说明书范本（2023年第119号公告）",
+    "issuer": "国家药品监督管理局",
+    "year": 2023,
+    "note": "官方范本入口；19 个 OTC 品种仍需逐条对照官方说明书并由药师审核。",
+    "verified": true,
+    "review_status": "source_mapped",
+    "url": "https://www.nmpa.gov.cn/xxgk/ggtg/ypggtg/ypqtggtg/20230913161325115.html",
+    "retrieved_at": "2026-11-16",
+    "verified_by": "项目组·公开文件核对"
+  },
+  {
+    "id": "src-who-pocket-book-2013",
+    "title": "Pocket Book of Hospital Care for Children (2nd ed.)",
+    "issuer": "World Health Organization",
+    "year": 2013,
+    "note": "儿童危险征象与转诊原则；具体临床审核待完成。",
+    "verified": true,
+    "review_status": "source_mapped",
+    "url": "https://www.who.int/publications/i/item/9789241548373",
+    "retrieved_at": "2026-11-16",
+    "verified_by": "项目组·公开文件核对"
   }
 ]

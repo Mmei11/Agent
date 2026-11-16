@@ -51,6 +51,8 @@ def _hit_payload(hit, sources: dict[str, Source]) -> dict:
             "id": hit.source_id,
             "title": source.title if source else "",
             "verified": source.verified if source else False,
+            "review_status": source.review_status if source else "pending",
+            "url": source.url if source else "",
         },
     }
 

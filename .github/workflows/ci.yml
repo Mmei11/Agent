@@ -55,6 +55,9 @@ jobs:
       - name: Skill eval (mock, gate 0.9)
         run: uv run python -m eval.skill_eval --min-accuracy 0.9
 
+      - name: Source verification (structure)
+        run: uv run python -m eval.source_check
+
       - name: Red team (dev only)
         run: uv run python -m eval.red_team --split dev
 
@@ -82,6 +85,7 @@ jobs:
             eval/results/adversarial-ci.json
             eval/results/skill-routing/skill-routing-report-rule.md
             eval/results/skill-eval/skill-eval-report.md
+            eval/results/source-check/source-check-report.md
           if-no-files-found: ignore
 
   docker:

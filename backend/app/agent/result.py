@@ -59,7 +59,12 @@ def build_completed_result(
         source = hits[0].get("source") or {}
         title = source.get("title") or source.get("id") or ""
         if title:
-            suffix = "" if source.get("verified") else "（未核实）"
+            if not source.get("verified"):
+                suffix = "（未核实）"
+            elif source.get("review_status") == "source_mapped":
+                suffix = "（来源已核对，临床审核待完成）"
+            else:
+                suffix = ""
             source_note = f"来源：{title}{suffix}"
 
     # 用 ConsultationResult schema 构建并校验，model_dump() 转成普通字典

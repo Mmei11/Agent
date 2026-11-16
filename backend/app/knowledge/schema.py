@@ -12,7 +12,7 @@ import json  # 读 sources.json 和 entries.jsonl
 from pathlib import Path  # 定位数据文件
 from typing import Literal  # 限定取值范围，写错在加载时就报错
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 # 数据文件与本文件同级。挪动目录结构时这里要跟着改
 DATA_DIR = Path(__file__).resolve().parent
@@ -31,6 +31,19 @@ class Source(BaseModel):
     year: int = Field(ge=1990, le=2100)  # 年份；限定区间可挡住漏填和手滑
     note: str = ""  # 补充说明，如"条目为项目归纳，非原文引用"
     verified: bool = False  # 默认未核实：宁可标出来，不假装已核实
+    # 来源核验状态：pending 未核 / source_mapped 已对公开来源 / clinically_reviewed 已临床审核
+    review_status: Literal["pending", "source_mapped", "clinically_reviewed"] = "pending"
+    url: str = ""
+    retrieved_at: str = ""  # 抓取日期，ISO 格式
+    verified_by: str = ""
+
+    @model_validator(mode="after")
+    def _verified_requires_evidence(self):
+        if self.verified and not (self.url and self.retrieved_at and self.verified_by):
+            raise ValueError(
+                "verified=true 的来源必须提供 url、retrieved_at、verified_by"
+            )
+        return self
 
 
 class ScopePayload(BaseModel):
@@ -61,6 +74,8 @@ class KnowledgeEntry(BaseModel):
     content: str = Field(min_length=1)
     # 指向 sources.json 里的 id，不直接写文件名
     source_id: str = Field(min_length=1)
+    # 条目级核验状态；来源可访问不等于临床内容已审核。
+    review_status: Literal["pending", "source_mapped", "clinically_reviewed"] = "pending"
     # 科室方向。只有 category=department_route 的条目才填，由 validate_store 强制
     department: str | None = None
     scope_payload: ScopePayload  # 机器可过滤的适用范围
