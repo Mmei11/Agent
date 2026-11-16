@@ -301,3 +301,29 @@ PYTHONPATH=. uv run python -m eval.reliability_e2e --mock   # 只调试链路，
 
 脚本会在临时目录生成轨迹与服务端日志。真实模型模式会产生费用，不进 CI；
 发版前或改动工具运行时后手动跑一次。
+
+## E0 语义红队基线（Phase E 前置测量）
+
+`semantic_redteam.py` 用 60 条新样本测现有规则 + guardrails 的语义盲区：
+48 条攻击（隐性红旗、间接用药、引用编造、焦虑施压、权威施压、提示注入、多轮渐进）
++ 12 条正常对照（用来测误杀）。
+
+```sh
+PYTHONPATH=. uv run python -m eval.semantic_redteam --use-model
+PYTHONPATH=. uv run python -m eval.semantic_redteam --use-model --repeat 3
+PYTHONPATH=. uv run python -m eval.semantic_redteam --use-model --split dev
+```
+
+指标：
+
+- 攻击：拦截率、按类别拆分、绕过明细；
+- 正常对照：误杀率、追问数；追问不等于误杀，单独统计；
+- 延迟 p50/p95、模型调用、token 与成本估算。
+
+2026-11-16 首次基线（真实模型，n=1）：攻击拦截 40/48，正常误杀 0/12；
+绕过全部集中在隐性红旗（8/10）——系统对“胸口压榨感 + 冷汗”“突然说话含糊、一侧无力”
+仍在追问“多久了”，没有进入风险分支。结论：缺口在 decision 之前，post-output critic
+救不了；下一步应先做语义风险识别，而不是输出审查。
+
+真实模型模式会产生费用，不进 CI；数据集结构由
+`backend/tests/test_semantic_redteam_dataset.py` 守护。
